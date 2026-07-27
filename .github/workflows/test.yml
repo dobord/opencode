@@ -67,9 +67,22 @@ jobs:
 
       - name: Run unit tests
         timeout-minutes: 20
-        run: GITHUB_ACTIONS=false bun turbo test
+        run: |
+          set +e
+          GITHUB_ACTIONS=false bun turbo test 2>&1 | tee "$RUNNER_TEMP/unit-test.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
+
+      - name: Upload unit test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unit-${{ matrix.settings.name }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/unit-test.log
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Check generated client
         if: runner.os == 'Linux'
