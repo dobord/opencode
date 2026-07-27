@@ -27,6 +27,8 @@ jobs:
           set +e
           (
             set -euxo pipefail
+            wc -c .github/marketplace-hardening/patch-*.b64
+            sha256sum .github/marketplace-hardening/patch-*.b64
             cat .github/marketplace-hardening/patch-*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/marketplace-hardening.patch"
             sha256sum "$RUNNER_TEMP/marketplace-hardening.patch"
 
@@ -53,7 +55,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: marketplace-hardening-apply-diagnostics
-          path: ${{ runner.temp }}/apply.log
+          path: |
+            ${{ runner.temp }}/apply.log
+            .github/marketplace-hardening/patch-*.b64
           if-no-files-found: error
           retention-days: 1
 
