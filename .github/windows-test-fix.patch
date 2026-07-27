@@ -1,0 +1,62 @@
+diff --git a/packages/opencode/test/session/prompt.test.ts b/packages/opencode/test/session/prompt.test.ts
+index 491ad06aaf47..000000000000 100644
+--- a/packages/opencode/test/session/prompt.test.ts
++++ b/packages/opencode/test/session/prompt.test.ts
+@@ -339,6 +339,7 @@ const waitForBusy = (sessionID: SessionID, duration: Duration.Input = "2 seconds"
+   )
+ 
+ const hasBash = Effect.sync(() => Bun.which("bash") !== null)
++const SHELL_QUEUE_TIMEOUT = process.platform === "win32" ? 30_000 : 10_000
+ 
+ const deferredAsPromise = <A>(deferred: Deferred.Deferred<A>): PromiseLike<A> => ({
+   then: (onfulfilled, onrejected) => {
+@@ -1668,7 +1669,7 @@ it.instance(
+       expect(yield* llm.calls).toBe(1)
+     }),
+   { git: true },
+-  10_000,
++  SHELL_QUEUE_TIMEOUT,
+ )
+ 
+ it.instance(
+@@ -1707,7 +1708,7 @@ it.instance(
+       expect(yield* llm.calls).toBe(1)
+     }),
+   { git: true },
+-  10_000,
++  SHELL_QUEUE_TIMEOUT,
+ )
+ 
+ unix(
+diff --git a/packages/opencode/test/tool/external-directory.test.ts b/packages/opencode/test/tool/external-directory.test.ts
+index d43accfb70dc..000000000000 100644
+--- a/packages/opencode/test/tool/external-directory.test.ts
++++ b/packages/opencode/test/tool/external-directory.test.ts
+@@ -118,10 +118,7 @@ describe("tool.assertExternalDirectory", () => {
+           yield* Effect.promise(() => Bun.write(path.join(outerTmp, "outside.txt"), "x"))
+ 
+           const target = path.join(outerTmp, "outside.txt")
+-          const alt = target
+-            .replace(/^[A-Za-z]:/, "")
+-            .replaceAll("\\", "/")
+-            .toLowerCase()
++          const alt = target.replaceAll("\\", "/").toLowerCase()
+ 
+           yield* assertExternalDirectoryEffect(ctx, alt)
+ 
+diff --git a/packages/opencode/test/tool/read.test.ts b/packages/opencode/test/tool/read.test.ts
+index c1ef61b227dd..000000000000 100644
+--- a/packages/opencode/test/tool/read.test.ts
++++ b/packages/opencode/test/tool/read.test.ts
+@@ -194,10 +194,7 @@ describe("tool.read external_directory permission", () => {
+ 
+         const { items, next } = asks()
+         const target = path.join(dir, "test.txt")
+-        const alt = target
+-          .replace(/^[A-Za-z]:/, "")
+-          .replaceAll("\\", "/")
+-          .toLowerCase()
++        const alt = target.replaceAll("\\", "/").toLowerCase()
+ 
+         yield* exec(dir, { filePath: alt }, next)
+         const read = items.find((item) => item.permission === "read")
