@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - marketplace-windows-targeted
+  pull_request:
+    branches:
+      - marketplace
 
 permissions:
   contents: read
