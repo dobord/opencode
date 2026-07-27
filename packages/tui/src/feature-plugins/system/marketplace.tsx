@@ -85,9 +85,10 @@ function details(listing: MarketplaceListing) {
     `publisher: ${listing.item.publisher?.name ?? listing.catalog.publisher?.name ?? "unknown"}`,
     `version: ${listing.item.version}`,
     `catalog: ${listing.source.name} (${listing.source.trust ?? "community"})`,
+    listing.orphaned ? "catalog status: unavailable; receipt can still be uninstalled" : undefined,
     `changes: ${marketplacePlanSummary(listing.item.install)}`,
     ...marketplacePermissions(listing.item).map((permission) => `permission: ${permission}`),
-  ]
+  ].filter((value): value is string => value !== undefined)
 }
 
 function View(props: { api: TuiPluginApi }) {

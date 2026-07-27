@@ -12,12 +12,12 @@ import {
   toggleMarketplaceSource,
   uninstallMarketplaceItem,
   upsertMarketplaceSource,
+  type MarketplaceConfiguredTrust,
   type MarketplaceConflict,
   type MarketplaceHostConfig,
   type MarketplaceKind,
   type MarketplaceListing,
   type MarketplaceSource,
-  type MarketplaceTrust,
 } from "@opencode-ai/core/marketplace"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { useServerSync } from "@/context/server-sync"
@@ -65,7 +65,7 @@ export function MarketplacePanel() {
     pending: undefined as Pending | undefined,
     sourceURL: "",
     sourceName: "",
-    sourceTrust: "community" as MarketplaceTrust,
+    sourceTrust: "community" as MarketplaceConfiguredTrust,
   })
 
   const config = () => store.config ?? (sync().data.config as Config & MarketplaceHostConfig)
@@ -79,6 +79,7 @@ export function MarketplacePanel() {
     const query = store.query.trim().toLowerCase()
     return (catalog()?.listings ?? []).filter((listing) => {
       const state = status(listing)
+      if (store.tab === "discover" && listing.orphaned) return false
       if (store.tab === "installed" && state === "available") return false
       if (store.tab === "updates" && state !== "update") return false
       if (store.kind !== "all" && listing.item.kind !== store.kind) return false
@@ -112,13 +113,14 @@ export function MarketplacePanel() {
       setStore("config", next)
       setStore("revision", (value) => value + 1)
       showToast({ variant: "success", description: message })
+      return true
     } catch (error) {
       showToast({
         variant: "error",
         title: "Marketplace request failed",
         description: error instanceof Error ? error.message : String(error),
       })
-      throw error
+      return false
     } finally {
       setStore("busy", false)
     }
@@ -145,7 +147,10 @@ export function MarketplacePanel() {
     setStore("pending", undefined)
     if (pending.action === "uninstall") {
       const result = uninstallMarketplaceItem(config(), pending.listing.key)
-      await save(result.config, `Removed ${pending.listing.item.name}`)
+      if (!(await save(result.config, `Removed ${pending.listing.item.name}`))) {
+        setStore("pending", pending)
+        return
+      }
       if (result.preserved.length) {
         showToast({
           title: "Settings preserved",
@@ -159,12 +164,34 @@ export function MarketplacePanel() {
       setStore("pending", { ...pending, conflicts: result.conflicts })
       return
     }
-    await save(result.config, `${pending.action === "update" ? "Updated" : "Installed"} ${pending.listing.item.name}`)
+    if (
+      !(await save(
+        result.config,
+        `${pending.action === "update" ? "Updated" : "Installed"} ${pending.listing.item.name}`,
+      ))
+    ) {
+      setStore("pending", pending)
+    }
   }
 
   async function updateAll() {
+    const candidates = updates()
+    const review = candidates.find(
+      (listing) => !["official", "verified"].includes(listing.source.trust ?? "community"),
+    )
+    if (review) {
+      const result = installMarketplaceItem(config(), review)
+      setStore("pending", {
+        listing: review,
+        action: "update",
+        conflicts: result.ok ? [] : result.conflicts,
+        trustWarning: true,
+      })
+      return
+    }
+
     let next = config()
-    for (const listing of updates()) {
+    for (const listing of candidates) {
       const result = installMarketplaceItem(next, listing)
       if (!result.ok) {
         setStore("pending", { listing, action: "update", conflicts: result.conflicts, trustWarning: false })
@@ -173,7 +200,7 @@ export function MarketplacePanel() {
       next = result.config
     }
     if (next === config()) return
-    await save(next, `Updated ${updates().length} marketplace item${updates().length === 1 ? "" : "s"}`)
+    await save(next, `Updated ${candidates.length} marketplace item${candidates.length === 1 ? "" : "s"}`)
   }
 
   async function addSource() {
@@ -183,8 +210,9 @@ export function MarketplacePanel() {
         name: store.sourceName || undefined,
         trust: store.sourceTrust,
       })
-      await save(upsertMarketplaceSource(config(), source), `Added catalog ${source.name}`)
-      setStore({ sourceURL: "", sourceName: "", sourceTrust: "community" })
+      if (await save(upsertMarketplaceSource(config(), source), `Added catalog ${source.name}`)) {
+        setStore({ sourceURL: "", sourceName: "", sourceTrust: "community" })
+      }
     } catch (error) {
       showToast({
         variant: "error",
@@ -220,6 +248,7 @@ export function MarketplacePanel() {
           <button
             type="button"
             class="rounded-md border border-border-base px-2 py-1 text-text-base hover:bg-surface-raised-base-hover"
+            disabled={store.busy}
             onClick={() => void catalogActions.refetch()}
           >
             Reload
@@ -457,6 +486,12 @@ function Details(props: {
           {props.status === "available" ? "Install" : props.status === "update" ? "Update" : "Uninstall"}
         </button>
       </div>
+      <Show when={props.listing.orphaned}>
+        <div class="mt-4 rounded-md border border-border-warning px-3 py-2 text-12-regular text-text-base">
+          This item is still installed, but its catalog is unavailable or no longer lists it. You can safely uninstall
+          it from this receipt-backed entry.
+        </div>
+      </Show>
       <p class="mt-4 whitespace-pre-wrap text-13-regular leading-5 text-text-base">{props.listing.item.description}</p>
       <div class="mt-4 grid grid-cols-2 gap-3 text-12-regular">
         <Meta label="Type" value={props.listing.item.kind} />
@@ -516,10 +551,10 @@ function Sources(props: {
   busy: boolean
   sourceURL: string
   sourceName: string
-  sourceTrust: MarketplaceTrust
+  sourceTrust: MarketplaceConfiguredTrust
   setURL: (value: string) => void
   setName: (value: string) => void
-  setTrust: (value: MarketplaceTrust) => void
+  setTrust: (value: MarketplaceConfiguredTrust) => void
   add: () => void
   toggle: (source: MarketplaceSource) => void
   remove: (source: MarketplaceSource) => void
@@ -575,7 +610,8 @@ function Sources(props: {
       <div class="mt-4 rounded-lg border border-border-weak bg-surface-base p-3">
         <h3 class="text-13-medium text-text-strong">Add catalog</h3>
         <p class="mt-1 text-12-regular text-text-weak">
-          Use a JSON URL, GitHub repository URL, or github:owner/repository shorthand.
+          Use an HTTPS JSON URL, GitHub repository URL, or github:owner/repository shorthand. Official and verified
+          trust is reserved for catalogs distributed by OpenCode.
         </p>
         <div class="mt-3 grid grid-cols-[1fr_180px] gap-2">
           <input
@@ -586,11 +622,10 @@ function Sources(props: {
           />
           <select
             value={props.sourceTrust}
-            onChange={(event) => props.setTrust(event.currentTarget.value as MarketplaceTrust)}
+            onChange={(event) => props.setTrust(event.currentTarget.value as MarketplaceConfiguredTrust)}
             class="rounded-md border border-border-base bg-background-base px-2 text-12-regular text-text-base"
           >
             <option value="community">Community</option>
-            <option value="verified">Verified</option>
             <option value="private">Private</option>
           </select>
           <input

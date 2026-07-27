@@ -1932,6 +1932,7 @@ export type Config = {
       [key: string]: {
         source: string
         source_url?: string
+        source_trust?: "official" | "verified" | "community" | "private"
         catalog: string
         catalog_name?: string
         item: string
@@ -1942,6 +1943,7 @@ export type Config = {
         fingerprint: string
         installed_at: string
         updated_at: string
+        snapshot?: unknown
         plan: unknown
         receipt: unknown
       }

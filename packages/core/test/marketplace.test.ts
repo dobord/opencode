@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  OFFICIAL_MARKETPLACE_SOURCE,
   createMarketplaceSource,
   installMarketplaceItem,
   loadMarketplace,
@@ -96,6 +97,44 @@ describe("marketplace catalogs", () => {
         ],
       }),
     ).toThrow("Duplicate marketplace item id")
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "ambiguous:catalog",
+        name: "X",
+        items: [],
+      }),
+    ).toThrow("cannot contain colons")
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "large",
+        name: "Large",
+        items: Array.from({ length: 2_001 }, (_, index) => ({
+          id: `item-${index}`,
+          name: "Item",
+          description: "Item",
+          kind: "skill",
+          version: "1",
+          install: {},
+        })),
+      }),
+    ).toThrow("too many items")
+  })
+
+  test("rejects oversized catalog responses before parsing", async () => {
+    const source = createMarketplaceSource({ url: "https://example.test/catalog.json" })
+    const result = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async () =>
+        new Response("{}", {
+          headers: { "content-length": String(2 * 1024 * 1024 + 1) },
+        }),
+    })
+
+    expect(result.listings).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]?.message).toContain("exceeds")
   })
 })
 
@@ -140,19 +179,38 @@ describe("marketplace installation", () => {
     expect(removed.config.agent?.reviewer).toEqual({ description: "User override" })
   })
 
-  test("detects updates and describes permissions", () => {
+  test("detects updates without offering catalog downgrades", () => {
     const installed = installMarketplaceItem({}, listing("1.0.0"), { force: true })
     if (!installed.ok) throw new Error("Expected install")
     expect(marketplaceStatus(installed.config, listing("1.0.0"))).toBe("installed")
     expect(marketplaceStatus(installed.config, listing("1.1.0"))).toBe("update")
+    expect(marketplaceStatus(installed.config, listing("0.9.0"))).toBe("installed")
+
+    const republished = listing("1.0.0")
+    republished.item.description = "Republished metadata"
+    expect(marketplaceStatus(installed.config, republished)).toBe("update")
     expect(marketplacePermissions(listing().item)).toContain("Runs third-party plugin code inside OpenCode")
     expect(marketplacePermissions(listing().item)).toContain("Starts or connects to MCP servers")
+  })
+
+  test("keeps installed items manageable after their catalog disappears", async () => {
+    const installed = installMarketplaceItem({}, listing(), { force: true })
+    if (!installed.ok) throw new Error("Expected install")
+
+    const loaded = await loadMarketplace({ config: installed.config })
+    const orphan = loaded.listings.find((item) => item.key === listing().key)
+    expect(orphan?.orphaned).toBe(true)
+    expect(orphan && marketplaceStatus(installed.config, orphan)).toBe("installed")
+
+    const removed = uninstallMarketplaceItem(installed.config, listing().key)
+    expect(removed.config.marketplace?.installed?.[listing().key]).toBeUndefined()
+    expect(removed.config.plugin).toEqual([])
   })
 })
 
 describe("marketplace sources", () => {
   test("adds, disables, and removes catalogs without hiding the built-in source", () => {
-    const source = createMarketplaceSource({ url: "github:example/catalog", trust: "verified" })
+    const source = createMarketplaceSource({ url: "github:example/catalog", trust: "community" })
     const added = upsertMarketplaceSource({}, source)
     expect(marketplaceSources(added).map((item) => item.id)).toEqual(["opencode", source.id])
     expect(source.url).toBe("https://raw.githubusercontent.com/example/catalog/HEAD/.opencode/marketplace.json")
@@ -162,5 +220,37 @@ describe("marketplace sources", () => {
 
     const removed = removeMarketplaceSource(disabled, source.id)
     expect(marketplaceSources(removed).map((item) => item.id)).toEqual(["opencode"])
+    expect(removeMarketplaceSource(removed, OFFICIAL_MARKETPLACE_SOURCE.id)).toEqual(removed)
+  })
+
+  test("does not let configured catalogs spoof official or verified provenance", () => {
+    const spoofed = upsertMarketplaceSource({}, {
+      id: OFFICIAL_MARKETPLACE_SOURCE.id,
+      name: "Not OpenCode",
+      url: "https://evil.example/catalog.json",
+      trust: "official",
+    })
+    expect(marketplaceSources(spoofed)[0]).toEqual(OFFICIAL_MARKETPLACE_SOURCE)
+
+    const legacy = upsertMarketplaceSource(spoofed, {
+      id: "legacy-verified",
+      name: "Legacy",
+      url: "https://example.test/catalog.json",
+      trust: "verified",
+    })
+    expect(marketplaceSources(legacy).find((source) => source.id === "legacy-verified")?.trust).toBe("community")
+  })
+
+  test("requires HTTPS except for loopback development catalogs", () => {
+    expect(() => createMarketplaceSource({ url: "http://example.test/catalog.json" })).toThrow("must use HTTPS")
+    expect(() => createMarketplaceSource({ url: "https://user:secret@example.test/catalog.json" })).toThrow(
+      "cannot contain credentials",
+    )
+    expect(createMarketplaceSource({ url: "http://127.0.0.1:4096/catalog.json" }).url).toBe(
+      "http://127.0.0.1:4096/catalog.json",
+    )
+    expect(createMarketplaceSource({ url: "https://example.test/catalog.json#ignored" }).url).toBe(
+      "https://example.test/catalog.json",
+    )
   })
 })

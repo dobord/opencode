@@ -26,14 +26,15 @@ Both interfaces support search, filtering, install, update, uninstall, source ma
 
 A marketplace source can be:
 
-- a direct HTTP or HTTPS URL to a catalog JSON file
+- a direct HTTPS URL to a catalog JSON file
+- an HTTP loopback URL for local development, such as `http://127.0.0.1:4096/catalog.json`
 - a GitHub repository URL containing `.opencode/marketplace.json`
 - `github:owner/repository`
 - `github:owner/repository/path/to/catalog.json`
 
-Catalogs are marked as `official`, `verified`, `community`, or `private`. The label records how much you trust the catalog; it does not sandbox installed code.
+Catalogs are marked as `official`, `verified`, `community`, or `private`. `official` and `verified` provenance is reserved for catalogs distributed by OpenCode; user-configured sources can be `community` or `private`. The label does not sandbox installed code.
 
-Private catalogs can include request headers in the `marketplace.sources` configuration. Keep credentials out of project configuration and prefer environment-backed server configuration when possible.
+Private catalogs can include request headers in the `marketplace.sources` configuration. Catalog URLs cannot embed usernames or passwords, and headers are never sent over non-loopback HTTP. Keep credentials out of project configuration and prefer environment-backed server configuration when possible.
 
 ## Catalog format
 
@@ -84,7 +85,7 @@ Catalogs use the `opencode.marketplace/v1` schema:
 }
 ```
 
-Each item needs an `id`, `name`, `description`, `kind`, `version`, and `install` plan. Supported kinds are `plugin`, `skill`, `agent`, `command`, `mcp`, and `bundle`.
+Each item needs an `id`, `name`, `description`, `kind`, `version`, and `install` plan. Supported kinds are `plugin`, `skill`, `agent`, `command`, `mcp`, and `bundle`. Catalog and item IDs are limited to 128 characters and cannot contain colons or control characters. Catalog responses are size- and item-count-limited before they are accepted.
 
 ## Install plans
 
@@ -124,9 +125,11 @@ Plugin entries accept the same package strings and `[package, options]` tuples a
 
 Before an install replaces an existing plugin, agent, command, or MCP server, OpenCode displays the conflicting paths and requires confirmation.
 
-Each successful install records a receipt in `marketplace.installed`. During uninstall, OpenCode restores the previous values only when the installed values are still unchanged. Settings edited by the user after installation are preserved and reported instead of being overwritten.
+Each successful install records a receipt and item snapshot in `marketplace.installed`. During uninstall, OpenCode restores the previous values only when the installed values are still unchanged. Settings edited by the user after installation are preserved and reported instead of being overwritten.
 
-Updates use the same receipt mechanism. Semantic versions are compared when possible, and changed item fingerprints are also detected so a republished catalog entry can be surfaced as an update.
+Installed items remain visible and removable even when their source is disabled, deleted, offline, or no longer publishes the item. OpenCode reconstructs an Installed entry from the saved receipt instead of orphaning the configuration.
+
+Updates use the same receipt mechanism. Semantic versions are compared when possible, and changed item fingerprints are also detected so a republished catalog entry can be surfaced as an update. A catalog cannot turn **Update all** into an implicit downgrade: lower semantic versions remain installed. Updates from community and private sources still require explicit review.
 
 ## Security
 

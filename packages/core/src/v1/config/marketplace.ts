@@ -17,6 +17,7 @@ export const Source = Schema.Struct({
 export const Installed = Schema.Struct({
   source: Schema.String,
   source_url: Schema.optional(Schema.String),
+  source_trust: Schema.optional(Trust),
   catalog: Schema.String,
   catalog_name: Schema.optional(Schema.String),
   item: Schema.String,
@@ -27,6 +28,7 @@ export const Installed = Schema.Struct({
   fingerprint: Schema.String,
   installed_at: Schema.String,
   updated_at: Schema.String,
+  snapshot: Schema.optional(Schema.Unknown),
   plan: Schema.Unknown,
   receipt: Schema.Unknown,
 })

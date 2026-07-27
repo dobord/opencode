@@ -3,6 +3,7 @@ import semver from "semver"
 
 export type MarketplaceKind = "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
 export type MarketplaceTrust = "official" | "verified" | "community" | "private"
+export type MarketplaceConfiguredTrust = Extract<MarketplaceTrust, "community" | "private">
 export type MarketplaceStatus = "available" | "installed" | "update"
 export type MarketplaceFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
@@ -93,6 +94,7 @@ export type MarketplaceReceipt = {
 export type MarketplaceInstalled = {
   source: string
   source_url?: string
+  source_trust?: MarketplaceTrust
   catalog: string
   catalog_name?: string
   item: string
@@ -103,6 +105,7 @@ export type MarketplaceInstalled = {
   fingerprint: string
   installed_at: string
   updated_at: string
+  snapshot?: MarketplaceCatalogItem
   plan: MarketplaceInstallPlan
   receipt: MarketplaceReceipt
 }
@@ -132,6 +135,7 @@ export type MarketplaceListing = {
   source: MarketplaceSource
   catalog: MarketplaceCatalog
   item: MarketplaceCatalogItem
+  orphaned?: boolean
 }
 
 export type MarketplaceLoadError = {
@@ -188,18 +192,29 @@ const OFFICIAL_MARKETPLACE_CATALOG: MarketplaceCatalog = {
 }
 
 const KINDS = new Set<MarketplaceKind>(["plugin", "skill", "agent", "command", "mcp", "bundle"])
-const TRUST = new Set<MarketplaceTrust>(["official", "verified", "community", "private"])
+const MAX_CATALOG_BYTES = 2 * 1024 * 1024
+const MAX_CATALOG_ITEMS = 2_000
+const MAX_IDENTIFIER_LENGTH = 128
 
 export function marketplaceSources(config: MarketplaceHostConfig) {
   const sources = new Map<string, MarketplaceSource>([[OFFICIAL_MARKETPLACE_SOURCE.id, OFFICIAL_MARKETPLACE_SOURCE]])
-  for (const source of config.marketplace?.sources ?? []) sources.set(source.id, source)
+  for (const source of config.marketplace?.sources ?? []) {
+    if (source.id === OFFICIAL_MARKETPLACE_SOURCE.id) {
+      sources.set(OFFICIAL_MARKETPLACE_SOURCE.id, {
+        ...OFFICIAL_MARKETPLACE_SOURCE,
+        enabled: source.enabled !== false,
+      })
+      continue
+    }
+    sources.set(source.id, { ...source, trust: configuredTrust(source.trust) })
+  }
   return Array.from(sources.values())
 }
 
 export function createMarketplaceSource(input: {
   url: string
   name?: string
-  trust?: MarketplaceTrust
+  trust?: MarketplaceConfiguredTrust
   headers?: Record<string, string>
 }) {
   const url = normalizeMarketplaceURL(input.url)
@@ -209,7 +224,7 @@ export function createMarketplaceSource(input: {
     name: input.name?.trim() || host || "Marketplace catalog",
     url,
     enabled: true,
-    trust: input.trust ?? "community",
+    trust: configuredTrust(input.trust),
     ...(input.headers ? { headers: input.headers } : {}),
   } satisfies MarketplaceSource
 }
@@ -217,9 +232,13 @@ export function createMarketplaceSource(input: {
 export function upsertMarketplaceSource(config: MarketplaceHostConfig, source: MarketplaceSource) {
   const next = clone(config)
   const sources = next.marketplace?.sources ?? []
+  const safe =
+    source.id === OFFICIAL_MARKETPLACE_SOURCE.id
+      ? { ...OFFICIAL_MARKETPLACE_SOURCE, enabled: source.enabled !== false }
+      : { ...source, trust: configuredTrust(source.trust) }
   next.marketplace = {
     ...next.marketplace,
-    sources: [...sources.filter((item) => item.id !== source.id), source],
+    sources: [...sources.filter((item) => item.id !== safe.id), safe],
   }
   return next
 }
@@ -231,6 +250,7 @@ export function toggleMarketplaceSource(config: MarketplaceHostConfig, id: strin
 }
 
 export function removeMarketplaceSource(config: MarketplaceHostConfig, id: string) {
+  if (id === OFFICIAL_MARKETPLACE_SOURCE.id) return clone(config)
   const next = clone(config)
   next.marketplace = {
     ...next.marketplace,
@@ -258,10 +278,7 @@ export async function loadMarketplace(input: {
                     headers: source.headers,
                     cache: "no-store",
                     signal: AbortSignal.timeout(input.timeout ?? 10_000),
-                  }).then(async (response) => {
-                    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
-                    return response.json()
-                  }),
+                  }).then(readCatalogResponse),
                 )
           return { ok: true as const, source, catalog }
         } catch (error) {
@@ -280,6 +297,43 @@ export async function loadMarketplace(input: {
     }))
   })
 
+  // Installation receipts must remain manageable even when a catalog is
+  // disabled, removed, unavailable, or withdraws an item. Synthesize a local
+  // listing from the receipt so Installed can still show and uninstall it.
+  const known = new Set(listings.map((listing) => listing.key))
+  const sources = marketplaceSources(input.config)
+  for (const [key, installed] of Object.entries(input.config.marketplace?.installed ?? {})) {
+    if (known.has(key)) continue
+    const source = sources.find((item) => item.id === installed.source) ?? {
+      id: installed.source,
+      name: installed.catalog_name ?? installed.source,
+      url: installed.source_url ?? "builtin://installed",
+      enabled: false,
+      trust: installed.source_trust ?? "community",
+    }
+    const item = installed.snapshot ?? {
+      id: installed.item,
+      name: installed.name,
+      description: "Installed marketplace item. Its catalog is currently unavailable or no longer lists it.",
+      kind: installed.kind,
+      version: installed.version,
+      ...(installed.publisher ? { publisher: { name: installed.publisher } } : {}),
+      install: clone(installed.plan),
+    }
+    listings.push({
+      key,
+      source,
+      catalog: {
+        schema: "opencode.marketplace/v1",
+        id: installed.catalog,
+        name: installed.catalog_name ?? installed.catalog,
+        items: [],
+      },
+      item,
+      orphaned: true,
+    })
+  }
+
   return {
     listings: listings.toSorted((a, b) => {
       if (a.item.featured !== b.item.featured) return a.item.featured ? -1 : 1
@@ -296,7 +350,11 @@ export function parseMarketplaceCatalog(value: unknown): MarketplaceCatalog {
   if (catalog.schema !== "opencode.marketplace/v1") {
     throw new Error("Unsupported marketplace schema; expected opencode.marketplace/v1")
   }
-  const items = array(catalog.items, "catalog.items").map((item, index) => parseItem(item, index))
+  const values = array(catalog.items, "catalog.items")
+  if (values.length > MAX_CATALOG_ITEMS) {
+    throw new Error(`Marketplace catalog contains too many items; maximum is ${MAX_CATALOG_ITEMS}`)
+  }
+  const items = values.map((item, index) => parseItem(item, index))
   const ids = new Set<string>()
   for (const item of items) {
     if (ids.has(item.id)) throw new Error(`Duplicate marketplace item id: ${item.id}`)
@@ -304,7 +362,7 @@ export function parseMarketplaceCatalog(value: unknown): MarketplaceCatalog {
   }
   return {
     schema: catalog.schema,
-    id: text(catalog.id, "catalog.id"),
+    id: identifier(catalog.id, "catalog.id"),
     name: text(catalog.name, "catalog.name"),
     ...(optionalText(catalog.description, "catalog.description") ? { description: catalog.description as string } : {}),
     ...(catalog.publisher === undefined ? {} : { publisher: parsePublisher(catalog.publisher, "catalog.publisher") }),
@@ -317,11 +375,17 @@ export function parseMarketplaceCatalog(value: unknown): MarketplaceCatalog {
 export function marketplaceStatus(config: MarketplaceHostConfig, listing: MarketplaceListing): MarketplaceStatus {
   const installed = config.marketplace?.installed?.[listing.key]
   if (!installed) return "available"
-  if (installed.fingerprint !== fingerprint(listing.item)) return "update"
+  if (listing.orphaned) return "installed"
+  const changed = installed.fingerprint !== fingerprint(listing.item)
   if (semver.valid(installed.version) && semver.valid(listing.item.version)) {
-    return semver.gt(listing.item.version, installed.version) ? "update" : "installed"
+    if (semver.gt(listing.item.version, installed.version)) return "update"
+    // A catalog must never turn Update All into an implicit downgrade. A lower
+    // version remains installed even if the catalog rewrites its metadata.
+    if (semver.lt(listing.item.version, installed.version)) return "installed"
+    return changed ? "update" : "installed"
   }
-  return installed.version === listing.item.version ? "installed" : "update"
+  if (installed.version !== listing.item.version) return "update"
+  return changed ? "update" : "installed"
 }
 
 export function installMarketplaceItem(
@@ -343,6 +407,7 @@ export function installMarketplaceItem(
       [listing.key]: {
         source: listing.source.id,
         source_url: listing.source.url,
+        source_trust: listing.source.trust,
         catalog: listing.catalog.id,
         catalog_name: listing.catalog.name,
         item: listing.item.id,
@@ -353,6 +418,7 @@ export function installMarketplaceItem(
         fingerprint: fingerprint(listing.item),
         installed_at: current?.installed_at ?? now,
         updated_at: now,
+        snapshot: clone(listing.item),
         plan: clone(listing.item.install),
         receipt,
       },
@@ -442,9 +508,16 @@ export function normalizeMarketplaceURL(value: string) {
     return `https://raw.githubusercontent.com/${owner}/${name}/HEAD/${parts.join("/") || ".opencode/marketplace.json"}`
   }
   const parsed = new URL(url)
+  if (parsed.username || parsed.password) throw new Error("Marketplace source URLs cannot contain credentials")
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new Error("Marketplace sources must use HTTPS, HTTP, github:, or builtin:")
   }
+  if (parsed.protocol === "http:" && !isLoopback(parsed.hostname)) {
+    throw new Error("Marketplace sources must use HTTPS; HTTP is only allowed for loopback development servers")
+  }
+  // Fragments are never sent to a server and make the same catalog hash to
+  // multiple source IDs, so canonicalize them away.
+  parsed.hash = ""
   if (parsed.hostname === "github.com") {
     const [owner, repo, action, branch, ...parts] = parsed.pathname.split("/").filter(Boolean)
     if (!owner || !repo) throw new Error("Invalid GitHub marketplace URL")
@@ -461,7 +534,7 @@ function parseItem(value: unknown, index: number): MarketplaceCatalogItem {
   const kind = text(item.kind, `catalog.items[${index}].kind`)
   if (!KINDS.has(kind as MarketplaceKind)) throw new Error(`Unsupported marketplace kind: ${kind}`)
   return {
-    id: text(item.id, `catalog.items[${index}].id`),
+    id: identifier(item.id, `catalog.items[${index}].id`),
     name: text(item.name, `catalog.items[${index}].name`),
     description: text(item.description, `catalog.items[${index}].description`),
     kind: kind as MarketplaceKind,
@@ -693,6 +766,35 @@ function marketplaceKey(source: string, catalog: string, item: string) {
 
 function fingerprint(item: MarketplaceCatalogItem) {
   return hash(stable(item))
+}
+
+async function readCatalogResponse(response: Response) {
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
+  const declared = Number(response.headers.get("content-length"))
+  if (Number.isFinite(declared) && declared > MAX_CATALOG_BYTES) {
+    throw new Error(`Marketplace catalog exceeds ${MAX_CATALOG_BYTES} bytes`)
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (bytes.byteLength > MAX_CATALOG_BYTES) {
+    throw new Error(`Marketplace catalog exceeds ${MAX_CATALOG_BYTES} bytes`)
+  }
+  return JSON.parse(new TextDecoder().decode(bytes))
+}
+
+function configuredTrust(value: MarketplaceTrust | undefined): MarketplaceConfiguredTrust {
+  return value === "private" ? "private" : "community"
+}
+
+function isLoopback(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+}
+
+function identifier(value: unknown, label: string) {
+  const result = text(value, label)
+  if (result.length > MAX_IDENTIFIER_LENGTH || result.includes(":") || /[\u0000-\u001f\u007f]/.test(result)) {
+    throw new Error(`${label} must be at most ${MAX_IDENTIFIER_LENGTH} characters and cannot contain colons or control characters`)
+  }
+  return result
 }
 
 function sourceHost(value: string) {

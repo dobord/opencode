@@ -77,7 +77,7 @@ describe("opencode run (non-interactive subprocess)", () => {
           model: "test/nonexistent-model",
           timeoutMs: 30_000,
         })
-        expect(result.exitCode).not.toBe(0)
+        expect(result.exitCode).toBe(1)
         expect(result.stderr).not.toContain("Timed out")
       }),
     45_000,
