@@ -1,0 +1,50 @@
+name: windows-test-fix-apply
+
+on:
+  pull_request:
+    branches:
+      - marketplace
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.repository == 'dobord/opencode' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout staged fix
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Apply Windows unit test fixes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp .github/windows-test-fix.patch "$RUNNER_TEMP/windows-test-fix.patch"
+          git fetch origin marketplace
+          git checkout --detach origin/marketplace
+          git apply --check "$RUNNER_TEMP/windows-test-fix.patch"
+          git apply "$RUNNER_TEMP/windows-test-fix.patch"
+          git diff --check
+
+          git config user.email "bot@opencode.ai"
+          git config user.name "opencode"
+          git add packages/opencode/test/session/prompt.test.ts \
+            packages/opencode/test/tool/external-directory.test.ts \
+            packages/opencode/test/tool/read.test.ts
+          git commit -m "test(opencode): stabilize Windows shell and path variants"
+          git push --force origin HEAD:refs/heads/marketplace-windows-test-result
+          git rev-parse HEAD > "$RUNNER_TEMP/result-sha"
+
+      - name: Upload result commit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: marketplace-windows-test-result
+          path: ${{ runner.temp }}/result-sha
+          if-no-files-found: error
+          retention-days: 1
