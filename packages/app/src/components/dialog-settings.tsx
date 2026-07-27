@@ -1,4 +1,4 @@
-import { Component, createSignal, startTransition } from "solid-js"
+import { Component, Show, Suspense, createSignal, lazy, startTransition } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -10,7 +10,8 @@ import { SettingsKeybinds } from "./settings-keybinds"
 import { SettingsProviders } from "./settings-providers"
 import { SettingsModels } from "./settings-models"
 import { SettingsServers } from "./settings-servers"
-import { MarketplacePanel } from "./marketplace-dialog"
+
+const MarketplacePanel = lazy(() => import("./marketplace-dialog").then((module) => ({ default: module.MarketplacePanel })))
 
 export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
   const language = useLanguage()
@@ -94,7 +95,11 @@ export const DialogSettings: Component<{ defaultValue?: string }> = (props) => {
           <SettingsModels />
         </Tabs.Content>
         <Tabs.Content value="marketplace" class="no-scrollbar">
-          <MarketplacePanel />
+          <Show when={tab() === "marketplace"}>
+            <Suspense fallback={<div class="p-4 text-text-weak">Loading marketplace…</div>}>
+              <MarketplacePanel />
+            </Suspense>
+          </Show>
         </Tabs.Content>
       </Tabs>
     </Dialog>
