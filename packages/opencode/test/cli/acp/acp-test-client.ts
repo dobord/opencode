@@ -3,6 +3,8 @@ import type { SessionConfigOption, SessionConfigSelectOption } from "@agentclien
 import { Duration, Effect } from "effect"
 import type { AcpHandle } from "../../lib/cli-process"
 
+const DEFAULT_TIMEOUT_MS = process.platform === "win32" ? 30_000 : 15_000
+
 type JsonRpcRequest = {
   readonly jsonrpc: "2.0"
   readonly id: number
@@ -24,7 +26,7 @@ type JsonRpcNotification<T = unknown> = {
 }
 
 export type AcpClient = {
-  readonly request: <T>(method: string, params?: unknown) => Effect.Effect<JsonRpcResponse<T>, unknown>
+  readonly request: <T>(method: string, params?: unknown, timeoutMs?: number) => Effect.Effect<JsonRpcResponse<T>, unknown>
   readonly receive: Effect.Effect<unknown>
   readonly waitForNotification: <T>(
     method: string,
@@ -36,7 +38,7 @@ export type AcpClient = {
 export function createAcpClient(acp: AcpHandle): AcpClient {
   const state = { nextId: 1 }
 
-  const request = <T>(method: string, params?: unknown) =>
+  const request = <T>(method: string, params?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS) =>
     Effect.gen(function* () {
       const id = state.nextId++
       const message: JsonRpcRequest =
@@ -44,15 +46,31 @@ export function createAcpClient(acp: AcpHandle): AcpClient {
       yield* acp.send(message)
 
       while (true) {
-        const received = yield* acp.receive.pipe(Effect.timeout(Duration.seconds(15)))
+        const received = yield* acp.receive.pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(timeoutMs),
+            orElse: () =>
+              Effect.fail(new Error(`Timed out after ${timeoutMs}ms waiting for ACP response to ${method} (id ${id})`)),
+          }),
+        )
         if (isJsonRpcResponse<T>(received) && received.id === id) return received
       }
     })
 
-  const waitForNotification = <T>(method: string, predicate: (params: T) => boolean, timeoutMs = 15_000) =>
+  const waitForNotification = <T>(
+    method: string,
+    predicate: (params: T) => boolean,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  ) =>
     Effect.gen(function* () {
       while (true) {
-        const received = yield* acp.receive.pipe(Effect.timeout(Duration.millis(timeoutMs)))
+        const received = yield* acp.receive.pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(timeoutMs),
+            orElse: () =>
+              Effect.fail(new Error(`Timed out after ${timeoutMs}ms waiting for ACP notification ${method}`)),
+          }),
+        )
         if (!isJsonRpcNotification<T>(received)) continue
         if (received.method === method && predicate(received.params as T)) return received
       }
