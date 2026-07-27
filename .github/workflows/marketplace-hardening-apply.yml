@@ -1,4 +1,4 @@
-name: marketplace-followup-apply
+name: marketplace-ownership-apply
 
 on:
   pull_request:
@@ -21,25 +21,25 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Apply marketplace follow-up
+      - name: Apply marketplace ownership hardening
         shell: bash
         run: |
           set +e
           (
             set -euxo pipefail
-            cat .github/marketplace-followup/patch-*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/marketplace-followup.patch"
-            sha256sum "$RUNNER_TEMP/marketplace-followup.patch"
+            cat .github/marketplace-ownership/patch-*.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/marketplace-ownership.patch"
+            sha256sum "$RUNNER_TEMP/marketplace-ownership.patch"
 
             git fetch origin marketplace
             git checkout --detach origin/marketplace
-            git apply --check "$RUNNER_TEMP/marketplace-followup.patch"
-            git apply "$RUNNER_TEMP/marketplace-followup.patch"
+            git apply --check "$RUNNER_TEMP/marketplace-ownership.patch"
+            git apply "$RUNNER_TEMP/marketplace-ownership.patch"
             git diff --check
 
             git config user.email "bot@opencode.ai"
             git config user.name "opencode"
             git add -A
-            git commit -m "fix: harden marketplace catalog parsing and attach cleanup"
+            git commit -m "fix: preserve shared marketplace receipt chains"
             git push --force origin HEAD:refs/heads/marketplace-hardening-result
             git rev-parse HEAD > "$RUNNER_TEMP/result-sha"
           ) > "$RUNNER_TEMP/apply.log" 2>&1
@@ -51,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: marketplace-followup-apply-diagnostics
+          name: marketplace-ownership-apply-diagnostics
           path: ${{ runner.temp }}/apply.log
           if-no-files-found: error
           retention-days: 1
@@ -60,7 +60,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: marketplace-followup-result
+          name: marketplace-ownership-result
           path: ${{ runner.temp }}/result-sha
           if-no-files-found: error
           retention-days: 1
