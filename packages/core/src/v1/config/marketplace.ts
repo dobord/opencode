@@ -1,0 +1,39 @@
+export * as ConfigMarketplaceV1 from "./marketplace"
+
+import { Schema } from "effect"
+
+export const Trust = Schema.Literals(["official", "verified", "community", "private"])
+export const Kind = Schema.Literals(["plugin", "skill", "agent", "command", "mcp", "bundle"])
+
+export const Source = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  url: Schema.String,
+  enabled: Schema.optional(Schema.Boolean),
+  trust: Schema.optional(Trust),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+
+export const Installed = Schema.Struct({
+  source: Schema.String,
+  source_url: Schema.optional(Schema.String),
+  catalog: Schema.String,
+  catalog_name: Schema.optional(Schema.String),
+  item: Schema.String,
+  name: Schema.String,
+  kind: Kind,
+  version: Schema.String,
+  publisher: Schema.optional(Schema.String),
+  fingerprint: Schema.String,
+  installed_at: Schema.String,
+  updated_at: Schema.String,
+  plan: Schema.Unknown,
+  receipt: Schema.Unknown,
+})
+
+export const Info = Schema.Struct({
+  sources: Schema.optional(Schema.mutable(Schema.Array(Source))),
+  installed: Schema.optional(Schema.Record(Schema.String, Installed)),
+})
+
+export type Info = Schema.Schema.Type<typeof Info>

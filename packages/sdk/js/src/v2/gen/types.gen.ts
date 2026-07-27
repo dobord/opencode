@@ -1917,6 +1917,36 @@ export type Config = {
         },
       ]
   >
+  marketplace?: {
+    sources?: Array<{
+      id: string
+      name: string
+      url: string
+      enabled?: boolean
+      trust?: "official" | "verified" | "community" | "private"
+      headers?: {
+        [key: string]: string
+      }
+    }>
+    installed?: {
+      [key: string]: {
+        source: string
+        source_url?: string
+        catalog: string
+        catalog_name?: string
+        item: string
+        name: string
+        kind: "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
+        version: string
+        publisher?: string
+        fingerprint: string
+        installed_at: string
+        updated_at: string
+        plan: unknown
+        receipt: unknown
+      }
+    }
+  }
   share?: "manual" | "auto" | "disabled"
   autoshare?: boolean
   /**

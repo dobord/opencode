@@ -1,0 +1,141 @@
+---
+title: Marketplace
+description: Discover, install, update, and remove OpenCode extensions
+---
+
+The OpenCode marketplace is a catalog-based package manager for reusable ecosystem assets:
+
+- plugins
+- skills
+- agents and subagents
+- slash commands
+- MCP servers
+- configuration bundles containing several asset types
+
+Marketplace installs update your normal OpenCode configuration. There is no separate runtime or proprietary package format.
+
+## Open the marketplace
+
+In the desktop or web app, open **Settings → Marketplace**.
+
+In the terminal UI, open the command palette and select **Marketplace**. Use **Marketplace sources** to add or disable catalogs.
+
+Both interfaces support search, filtering, install, update, uninstall, source management, provenance, trust labels, permission summaries, and conflict confirmation.
+
+## Add a catalog
+
+A marketplace source can be:
+
+- a direct HTTP or HTTPS URL to a catalog JSON file
+- a GitHub repository URL containing `.opencode/marketplace.json`
+- `github:owner/repository`
+- `github:owner/repository/path/to/catalog.json`
+
+Catalogs are marked as `official`, `verified`, `community`, or `private`. The label records how much you trust the catalog; it does not sandbox installed code.
+
+Private catalogs can include request headers in the `marketplace.sources` configuration. Keep credentials out of project configuration and prefer environment-backed server configuration when possible.
+
+## Catalog format
+
+Catalogs use the `opencode.marketplace/v1` schema:
+
+```json
+{
+  "schema": "opencode.marketplace/v1",
+  "id": "acme-tools",
+  "name": "Acme developer tools",
+  "publisher": {
+    "name": "Acme",
+    "url": "https://example.com",
+    "verified": true
+  },
+  "items": [
+    {
+      "id": "review-kit",
+      "name": "Review kit",
+      "description": "Adds a review agent, command, and documentation MCP server.",
+      "kind": "bundle",
+      "version": "1.2.0",
+      "repository": "https://github.com/acme/review-kit",
+      "license": "MIT",
+      "permissions": ["Connects to the Acme documentation service"],
+      "setup": ["Set ACME_DOCS_TOKEN before using the MCP server"],
+      "install": {
+        "agents": {
+          "reviewer": {
+            "description": "Review code changes",
+            "mode": "subagent"
+          }
+        },
+        "commands": {
+          "review": {
+            "template": "Review the current changes"
+          }
+        },
+        "mcp": {
+          "acme-docs": {
+            "type": "remote",
+            "url": "https://example.com/mcp"
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+Each item needs an `id`, `name`, `description`, `kind`, `version`, and `install` plan. Supported kinds are `plugin`, `skill`, `agent`, `command`, `mcp`, and `bundle`.
+
+## Install plans
+
+An install plan can update these OpenCode configuration fields:
+
+```json
+{
+  "plugins": ["example-plugin@1.0.0"],
+  "skills": {
+    "paths": ["./shared-skills"],
+    "urls": ["https://example.com/skills/"]
+  },
+  "agents": {
+    "reviewer": {
+      "description": "Review code",
+      "mode": "subagent"
+    }
+  },
+  "commands": {
+    "review": {
+      "template": "Review the current changes"
+    }
+  },
+  "mcp": {
+    "docs": {
+      "type": "remote",
+      "url": "https://example.com/mcp"
+    }
+  },
+  "instructions": [".opencode/review.md"]
+}
+```
+
+Plugin entries accept the same package strings and `[package, options]` tuples as the `plugin` configuration field.
+
+## Conflicts and uninstall receipts
+
+Before an install replaces an existing plugin, agent, command, or MCP server, OpenCode displays the conflicting paths and requires confirmation.
+
+Each successful install records a receipt in `marketplace.installed`. During uninstall, OpenCode restores the previous values only when the installed values are still unchanged. Settings edited by the user after installation are preserved and reported instead of being overwritten.
+
+Updates use the same receipt mechanism. Semantic versions are compared when possible, and changed item fingerprints are also detected so a republished catalog entry can be surfaced as an update.
+
+## Security
+
+A marketplace is a discovery and configuration mechanism, not a sandbox.
+
+- Plugins execute code inside OpenCode.
+- Local MCP servers execute commands on your machine.
+- Remote MCP servers receive requests and may require credentials.
+- Skills and instructions influence agent behavior.
+- Agents and commands can change model, tool, and permission configuration.
+
+Review the publisher, source catalog, repository, requested capabilities, and resulting configuration before confirming an install. Prefer official or verified catalogs for executable plugins, and pin package versions when reproducibility matters.
