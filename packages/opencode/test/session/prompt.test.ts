@@ -337,6 +337,7 @@ const waitForBusy = (sessionID: SessionID, duration: Duration.Input = "2 seconds
   )
 
 const hasBash = Effect.sync(() => Bun.which("bash") !== null)
+const SHELL_QUEUE_TIMEOUT = process.platform === "win32" ? 30_000 : 10_000
 
 const deferredAsPromise = <A>(deferred: Deferred.Deferred<A>): PromiseLike<A> => ({
   then: (onfulfilled, onrejected) => {
@@ -1701,7 +1702,7 @@ it.instance(
       expect(yield* llm.calls).toBe(1)
     }),
   { git: true },
-  10_000,
+  SHELL_QUEUE_TIMEOUT,
 )
 
 it.instance(
@@ -1740,7 +1741,7 @@ it.instance(
       expect(yield* llm.calls).toBe(1)
     }),
   { git: true },
-  10_000,
+  SHELL_QUEUE_TIMEOUT,
 )
 
 unix(
