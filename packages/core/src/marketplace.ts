@@ -172,6 +172,11 @@ export type MarketplaceUninstallResult = {
   preserved: string[]
 }
 
+type MarketplaceInstalledEntry = {
+  key: string
+  installed: MarketplaceInstalled
+}
+
 export const OFFICIAL_MARKETPLACE_SOURCE: MarketplaceSource = {
   id: "opencode",
   name: "OpenCode",
@@ -437,13 +442,14 @@ export function uninstallMarketplaceItem(config: MarketplaceHostConfig, key: str
   if (!installed) return { config: clone(config), preserved: [] }
   const next = clone(config)
   const preserved: string[] = []
-  restorePlugins(next, installed, preserved)
-  restoreArray(next, "skills.paths", installed.plan.skills?.paths, installed.receipt.skills?.paths, preserved)
-  restoreArray(next, "skills.urls", installed.plan.skills?.urls, installed.receipt.skills?.urls, preserved)
-  restoreObject(next, "agent", installed.plan.agents, installed.receipt.agents, preserved)
-  restoreObject(next, "command", installed.plan.commands, installed.receipt.commands, preserved)
-  restoreObject(next, "mcp", installed.plan.mcp, installed.receipt.mcp, preserved)
-  restoreArray(next, "instructions", installed.plan.instructions, installed.receipt.instructions, preserved)
+  const successors = installedAfter(next, key)
+  restorePlugins(next, installed, successors, preserved)
+  restoreArray(next, "skills.paths", installed.plan.skills?.paths, installed.receipt.skills?.paths, successors, preserved)
+  restoreArray(next, "skills.urls", installed.plan.skills?.urls, installed.receipt.skills?.urls, successors, preserved)
+  restoreObject(next, "agent", installed.plan.agents, installed.receipt.agents, successors, preserved)
+  restoreObject(next, "command", installed.plan.commands, installed.receipt.commands, successors, preserved)
+  restoreObject(next, "mcp", installed.plan.mcp, installed.receipt.mcp, successors, preserved)
+  restoreArray(next, "instructions", installed.plan.instructions, installed.receipt.instructions, successors, preserved)
   const entries = { ...next.marketplace?.installed }
   delete entries[key]
   next.marketplace = { ...next.marketplace, installed: entries }
@@ -587,8 +593,17 @@ function parseCompatibility(value: unknown, label: string) {
 
 function parsePlan(value: unknown, label: string): MarketplaceInstallPlan {
   const plan = record(value, label)
+  const parsedPlugins = plan.plugins === undefined ? undefined : plugins(plan.plugins, `${label}.plugins`)
+  if (parsedPlugins) {
+    const identities = new Set<string>()
+    for (const plugin of parsedPlugins) {
+      const identity = pluginIdentity(plugin)
+      if (identities.has(identity)) throw new Error(`${label}.plugins contains duplicate package identity: ${identity}`)
+      identities.add(identity)
+    }
+  }
   return {
-    ...(plan.plugins === undefined ? {} : { plugins: plugins(plan.plugins, `${label}.plugins`) }),
+    ...(parsedPlugins ? { plugins: parsedPlugins } : {}),
     ...(plan.skills === undefined ? {} : { skills: parseSkills(plan.skills, `${label}.skills`) }),
     ...(plan.agents === undefined ? {} : { agents: objectMap(plan.agents, `${label}.agents`) }),
     ...(plan.commands === undefined ? {} : { commands: objectMap(plan.commands, `${label}.commands`) }),
@@ -607,9 +622,9 @@ function parseSkills(value: unknown, label: string) {
 
 function plugins(value: unknown, label: string): MarketplacePluginSpec[] {
   return array(value, label).map((item, index) => {
-    if (typeof item === "string" && item.trim()) return item
-    if (Array.isArray(item) && item.length === 2 && typeof item[0] === "string" && isRecord(item[1])) {
-      return [item[0], item[1]]
+    if (typeof item === "string" && item.trim()) return item.trim()
+    if (Array.isArray(item) && item.length === 2 && typeof item[0] === "string" && item[0].trim() && isRecord(item[1])) {
+      return [item[0].trim(), item[1]]
     }
     throw new Error(`${label}[${index}] must be a plugin package string or [package, options] tuple`)
   })
@@ -686,16 +701,26 @@ function applyObject(
   return receipt
 }
 
-function restorePlugins(config: MarketplaceHostConfig, installed: MarketplaceInstalled, preserved: string[]) {
+function restorePlugins(
+  config: MarketplaceHostConfig,
+  installed: MarketplaceInstalled,
+  successors: MarketplaceInstalledEntry[],
+  preserved: string[],
+) {
   for (const plugin of installed.plan.plugins ?? []) {
     const identity = pluginIdentity(plugin)
+    const receipt = installed.receipt.plugins?.find((item) => item.identity === identity)
+    if (claimPlugin(successors, identity, plugin, receipt?.previous)) continue
+    if (!receipt) {
+      preserved.push(`plugin.${identity}`)
+      continue
+    }
     const current = (config.plugin ?? []).filter((item) => pluginIdentity(item) === identity)
     if (!equal(current, [plugin])) {
       preserved.push(`plugin.${identity}`)
       continue
     }
-    const previous = installed.receipt.plugins?.find((item) => item.identity === identity)?.previous ?? []
-    config.plugin = [...(config.plugin ?? []).filter((item) => pluginIdentity(item) !== identity), ...clone(previous)]
+    config.plugin = [...(config.plugin ?? []).filter((item) => pluginIdentity(item) !== identity), ...clone(receipt.previous)]
   }
 }
 
@@ -704,17 +729,23 @@ function restoreObject(
   root: "agent" | "command" | "mcp",
   values: Record<string, Record<string, unknown>> | undefined,
   receipt: Record<string, MarketplaceRestoreValue> | undefined,
+  successors: MarketplaceInstalledEntry[],
   preserved: string[],
 ) {
   if (!values) return
   const current = { ...(config[root] ?? {}) }
   for (const [key, value] of Object.entries(values)) {
+    const previous = receipt?.[key]
+    if (claimObject(successors, root, key, value, previous)) continue
+    if (!previous) {
+      preserved.push(`${root}.${key}`)
+      continue
+    }
     if (!equal(current[key], value)) {
       preserved.push(`${root}.${key}`)
       continue
     }
-    const previous = receipt?.[key]
-    if (previous?.existed) current[key] = clone(previous.value)
+    if (previous.existed) current[key] = clone(previous.value)
     else delete current[key]
   }
   config[root] = current
@@ -725,15 +756,117 @@ function restoreArray(
   path: "skills.paths" | "skills.urls" | "instructions",
   values: string[] | undefined,
   receipt: Record<string, boolean> | undefined,
+  successors: MarketplaceInstalledEntry[],
   preserved: string[],
 ) {
   if (!values) return
-  const current = readArray(config, path)
-  const next = current.filter((value) => receipt?.[value] !== false)
+  let current = readArray(config, path)
   for (const value of values) {
-    if (receipt?.[value] === false && !current.includes(value)) preserved.push(`${path}.${value}`)
+    const existed = receipt?.[value]
+    if (claimArray(successors, path, value, existed)) continue
+    if (existed === undefined) {
+      preserved.push(`${path}.${value}`)
+      continue
+    }
+    if (existed) continue
+    if (!current.includes(value)) {
+      preserved.push(`${path}.${value}`)
+      continue
+    }
+    current = current.filter((item) => item !== value)
   }
-  writeArray(config, path, next)
+  writeArray(config, path, current)
+}
+
+function installedAfter(config: MarketplaceHostConfig, key: string): MarketplaceInstalledEntry[] {
+  const entries = Object.entries(config.marketplace?.installed ?? {})
+  const index = entries.findIndex(([candidate]) => candidate === key)
+  if (index < 0) return []
+  return entries.slice(index + 1).map(([candidate, installed]) => ({ key: candidate, installed }))
+}
+
+function claimPlugin(
+  successors: MarketplaceInstalledEntry[],
+  identity: string,
+  value: MarketplacePluginSpec,
+  previous: MarketplacePluginSpec[] | undefined,
+) {
+  let claimed = false
+  for (const entry of successors) {
+    const candidate = (entry.installed.plan.plugins ?? []).find((item) => pluginIdentity(item) === identity)
+    if (!candidate) continue
+    claimed = true
+    const receipt = entry.installed.receipt.plugins?.find((item) => item.identity === identity)
+    if (!receipt || !previous || !equal(receipt.previous, [value])) continue
+    receipt.previous = clone(previous)
+    return true
+  }
+  return claimed
+}
+
+function claimObject(
+  successors: MarketplaceInstalledEntry[],
+  root: "agent" | "command" | "mcp",
+  key: string,
+  value: Record<string, unknown>,
+  previous: MarketplaceRestoreValue | undefined,
+) {
+  let claimed = false
+  for (const entry of successors) {
+    const plan = installedObject(entry.installed.plan, root)
+    if (!plan || !(key in plan)) continue
+    claimed = true
+    const receipt = installedObjectReceipt(entry.installed.receipt, root)
+    const prior = receipt?.[key]
+    if (!prior?.existed || !previous || !equal(prior.value, value)) continue
+    receipt![key] = clone(previous)
+    return true
+  }
+  return claimed
+}
+
+
+function installedObject(plan: MarketplaceInstallPlan, root: "agent" | "command" | "mcp") {
+  if (root === "agent") return plan.agents
+  if (root === "command") return plan.commands
+  return plan.mcp
+}
+
+function installedObjectReceipt(receipt: MarketplaceReceipt, root: "agent" | "command" | "mcp") {
+  if (root === "agent") return receipt.agents
+  if (root === "command") return receipt.commands
+  return receipt.mcp
+}
+
+function claimArray(
+  successors: MarketplaceInstalledEntry[],
+  path: "skills.paths" | "skills.urls" | "instructions",
+  value: string,
+  existed: boolean | undefined,
+) {
+  let claimed = false
+  for (const entry of successors) {
+    if (!installedArray(entry.installed.plan, path).includes(value)) continue
+    claimed = true
+    const receipt = installedArrayReceipt(entry.installed.receipt, path)
+    if (receipt?.[value] !== true || existed === undefined) continue
+    receipt[value] = existed
+    return true
+  }
+  return claimed
+}
+
+function installedArray(plan: MarketplaceInstallPlan, path: "skills.paths" | "skills.urls" | "instructions") {
+  if (path === "instructions") return plan.instructions ?? []
+  return plan.skills?.[path === "skills.paths" ? "paths" : "urls"] ?? []
+}
+
+function installedArrayReceipt(
+  receipt: MarketplaceReceipt,
+  path: "skills.paths" | "skills.urls" | "instructions",
+) {
+  if (path === "instructions") return receipt.instructions
+  return receipt.skills?.[path === "skills.paths" ? "paths" : "urls"]
 }
 
 function readArray(config: MarketplaceHostConfig, path: "skills.paths" | "skills.urls" | "instructions") {

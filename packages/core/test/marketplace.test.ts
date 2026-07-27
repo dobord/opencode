@@ -49,6 +49,15 @@ function listing(version = "1.0.0"): MarketplaceListing {
   }
 }
 
+function keyedListing(id: string, version = "1.0.0") {
+  const result = listing(version)
+  result.key = `community:tools:${id}`
+  result.item.id = id
+  result.item.name = `Review kit ${id}`
+  return result
+}
+
+
 describe("marketplace catalogs", () => {
   test("loads enabled catalogs and reports source failures", async () => {
     const source = createMarketplaceSource({ url: "https://example.test/catalog.json", name: "Example" })
@@ -120,6 +129,23 @@ describe("marketplace catalogs", () => {
         })),
       }),
     ).toThrow("too many items")
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "plugins",
+        name: "Plugins",
+        items: [
+          {
+            id: "duplicates",
+            name: "Duplicates",
+            description: "Duplicates",
+            kind: "plugin",
+            version: "1.0.0",
+            install: { plugins: ["example-plugin@1.0.0", "example-plugin@2.0.0"] },
+          },
+        ],
+      }),
+    ).toThrow("duplicate package identity")
   })
 
   test("rejects oversized catalog responses before parsing", async () => {
@@ -225,6 +251,71 @@ describe("marketplace installation", () => {
     expect(removed.preserved).toEqual(["plugin.example-plugin", "agent.reviewer"])
     expect(removed.config.plugin).toEqual(["example-plugin@3.0.0"])
     expect(removed.config.agent?.reviewer).toEqual({ description: "User override" })
+  })
+
+  test("keeps shared receipts valid when packages are removed out of order", () => {
+    const firstListing = keyedListing("first")
+    const secondListing = keyedListing("second")
+    const original: MarketplaceHostConfig = {
+      plugin: [["example-plugin@1.0.0", { strict: false }]],
+      agent: { reviewer: { description: "Existing" } },
+    }
+
+    const first = installMarketplaceItem(original, firstListing, { force: true })
+    if (!first.ok) throw new Error("Expected first install")
+    const second = installMarketplaceItem(first.config, secondListing)
+    if (!second.ok) throw new Error("Expected shared install")
+
+    const withoutFirst = uninstallMarketplaceItem(second.config, firstListing.key)
+    expect(withoutFirst.preserved).toEqual([])
+    expect(withoutFirst.config.plugin).toEqual([["example-plugin@2.0.0", { strict: true }]])
+    expect(withoutFirst.config.agent?.reviewer).toEqual({ description: "Review changes", mode: "subagent" })
+    expect(withoutFirst.config.skills?.urls).toEqual(["https://example.test/skills/"])
+
+    const withoutSecond = uninstallMarketplaceItem(withoutFirst.config, secondListing.key)
+    expect(withoutSecond.preserved).toEqual([])
+    expect(withoutSecond.config.plugin).toEqual([["example-plugin@1.0.0", { strict: false }]])
+    expect(withoutSecond.config.agent?.reviewer).toEqual({ description: "Existing" })
+    expect(withoutSecond.config.skills?.urls).toEqual([])
+    expect(withoutSecond.config.command).toEqual({})
+    expect(withoutSecond.config.mcp).toEqual({})
+    expect(withoutSecond.config.instructions).toEqual([])
+  })
+
+  test("splices overridden receipt chains when an earlier package is removed first", () => {
+    const firstListing = keyedListing("first")
+    const secondListing = keyedListing("second")
+    secondListing.item.install.plugins = [["example-plugin@3.0.0", { strict: true }]]
+    secondListing.item.install.agents = { reviewer: { description: "Second", mode: "subagent" } }
+    const original: MarketplaceHostConfig = {
+      plugin: [["example-plugin@1.0.0", { strict: false }]],
+      agent: { reviewer: { description: "Existing" } },
+    }
+
+    const first = installMarketplaceItem(original, firstListing, { force: true })
+    if (!first.ok) throw new Error("Expected first install")
+    const second = installMarketplaceItem(first.config, secondListing, { force: true })
+    if (!second.ok) throw new Error("Expected overriding install")
+
+    const withoutFirst = uninstallMarketplaceItem(second.config, firstListing.key)
+    expect(withoutFirst.config.plugin).toEqual([["example-plugin@3.0.0", { strict: true }]])
+    expect(withoutFirst.config.agent?.reviewer).toEqual({ description: "Second", mode: "subagent" })
+
+    const withoutSecond = uninstallMarketplaceItem(withoutFirst.config, secondListing.key)
+    expect(withoutSecond.config.plugin).toEqual([["example-plugin@1.0.0", { strict: false }]])
+    expect(withoutSecond.config.agent?.reviewer).toEqual({ description: "Existing" })
+  })
+
+  test("preserves managed values when an installation receipt is incomplete", () => {
+    const item = keyedListing("incomplete")
+    item.item.install = { plugins: ["example-plugin@2.0.0"] }
+    const installed = installMarketplaceItem({}, item, { force: true })
+    if (!installed.ok) throw new Error("Expected install")
+    installed.config.marketplace!.installed![item.key]!.receipt = {}
+
+    const removed = uninstallMarketplaceItem(installed.config, item.key)
+    expect(removed.preserved).toEqual(["plugin.example-plugin"])
+    expect(removed.config.plugin).toEqual(["example-plugin@2.0.0"])
   })
 
   test("detects updates without offering catalog downgrades", () => {
