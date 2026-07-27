@@ -1,0 +1,49 @@
+name: acp-windows-targeted
+
+on:
+  push:
+    branches:
+      - marketplace-acp-timeout-verify
+  pull_request:
+    branches:
+      - marketplace
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  targeted:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Repeat full ACP lifecycle suite
+        working-directory: packages/opencode
+        env:
+          OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: true
+        run: |
+          for attempt in 1 2 3; do
+            echo "ACP lifecycle attempt $attempt"
+            bun test --timeout 60000 test/cli/acp/lifecycle.test.ts
+          done
