@@ -1,0 +1,36 @@
+name: marketplace-dev-export
+
+on:
+  push:
+    branches:
+      - marketplace
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Upload marketplace working set
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: marketplace-working-set-${{ github.sha }}
+          path: |
+            .github/workflows/test.yml
+            packages/core/src/marketplace.ts
+            packages/core/src/v1/config/marketplace.ts
+            packages/core/test/marketplace.test.ts
+            packages/app/src/components/marketplace-dialog.tsx
+            packages/tui/src/feature-plugins/system/marketplace.tsx
+            packages/opencode/src/cli/cmd/run.ts
+            packages/opencode/test/cli/run/run-process.test.ts
+            packages/sdk/js/src/v2/gen/types.gen.ts
+            packages/web/src/content/docs/marketplace.mdx
+          if-no-files-found: error
+          retention-days: 1
