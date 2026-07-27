@@ -1,0 +1,49 @@
+name: windows-targeted
+
+on:
+  push:
+    branches:
+      - marketplace-windows-targeted
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Run canonical worktree snapshot test
+        working-directory: packages/core
+        run: bun test --timeout 30000 test/snapshot.test.ts --test-name-pattern "canonical Git worktree"
+
+      - name: Run shell queue tests
+        working-directory: packages/opencode
+        run: bun test --timeout 30000 test/session/prompt.test.ts --test-name-pattern "loop waits while shell runs|shell completion resumes queued loop callers"
+        env:
+          OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: true
+
+      - name: Run Windows path normalization tests
+        working-directory: packages/opencode
+        run: bun test --timeout 30000 test/tool/external-directory.test.ts test/tool/read.test.ts --test-name-pattern "normalizes"
+        env:
+          OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: true
