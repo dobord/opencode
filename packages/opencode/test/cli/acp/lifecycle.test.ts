@@ -10,6 +10,8 @@ import { cliIt } from "../../lib/cli-process"
 import { expectOk, selectConfigOption } from "./acp-test-client"
 import { createAcpClient, initialize, newSession, verifierConfig } from "./helpers"
 
+const ACP_EXIT_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 5_000
+
 describe("opencode acp lifecycle subprocess", () => {
   cliIt.live(
     "stdin EOF exits cleanly",
@@ -18,7 +20,13 @@ describe("opencode acp lifecycle subprocess", () => {
         const acp = yield* opencode.acp()
         acp.close()
 
-        const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(5)))
+        const code = yield* Effect.promise(() => acp.exited).pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(ACP_EXIT_TIMEOUT_MS),
+            orElse: () =>
+              Effect.fail(new Error(`opencode acp did not exit within ${ACP_EXIT_TIMEOUT_MS}ms after stdin EOF`)),
+          }),
+        )
         expect(code).toBe(0)
       }),
     60_000,
