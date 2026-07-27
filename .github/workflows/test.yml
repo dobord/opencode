@@ -30,9 +30,11 @@ jobs:
           - name: linux
             host: blacksmith-4vcpu-ubuntu-2404
             fallback: ubuntu-latest
+            fallback_concurrency: 4
           - name: windows
             host: blacksmith-4vcpu-windows-2025
             fallback: windows-latest
+            fallback_concurrency: 2
     runs-on: ${{ github.repository == 'anomalyco/opencode' && matrix.settings.host || matrix.settings.fallback }}
     defaults:
       run:
@@ -66,10 +68,14 @@ jobs:
             turbo-${{ runner.os }}-
 
       - name: Run unit tests
-        timeout-minutes: 20
+        timeout-minutes: ${{ github.repository == 'anomalyco/opencode' && 20 || 45 }}
         run: |
           set +e
-          GITHUB_ACTIONS=false bun turbo test 2>&1 | tee "$RUNNER_TEMP/unit-test.log"
+          args=()
+          if [ "${{ github.repository }}" != "anomalyco/opencode" ]; then
+            args+=(--concurrency=${{ matrix.settings.fallback_concurrency }})
+          fi
+          GITHUB_ACTIONS=false bun turbo test "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/unit-test.log"
           status=${PIPESTATUS[0]}
           exit "$status"
         env:
