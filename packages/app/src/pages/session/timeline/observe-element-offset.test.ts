@@ -45,14 +45,12 @@ test("reports a divergent native offset once and ignores equal offsets and unrel
 
   route.remove()
   document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await frames(3)
+  await settleUntil(() => calls.length === 1)
   expect(calls).toEqual([[0, false]])
 
   route.remove()
   document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await frames(3)
+  await settleUntil(() => calls.length > 1, 5)
   expect(calls).toEqual([[0, false]])
 
   cleanup?.()
@@ -83,13 +81,11 @@ test("keeps checking until stale reset-delay callbacks can no longer win", async
 
   route.remove()
   document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await frames(1)
+  await settleUntil(() => instance.scrollOffset === 0)
   expect(instance.scrollOffset).toBe(0)
 
   instance.scrollOffset = 79_400
-  await new Promise((resolve) => setTimeout(resolve, 25))
-  await frames(3)
+  await settleUntil(() => calls.length === 2)
 
   expect(instance.scrollOffset).toBe(0)
   expect(calls).toEqual([0, 0])
@@ -125,8 +121,7 @@ test.each([
 
   route.remove()
   document.body.append(route)
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  await frames(3)
+  await settleUntil(() => calls.length === 1)
 
   expect(calls).toEqual([[expected, false]])
   cleanup?.()
@@ -155,7 +150,7 @@ test("cleanup suppresses an already queued delegated offset callback", async () 
 
   viewport.dispatchEvent(new Event("scroll"))
   cleanup?.()
-  await new Promise((resolve) => setTimeout(resolve, 25))
+  await settleUntil(() => calls.length === 1)
 
   expect(calls).toEqual([[100, true]])
   viewport.remove()
@@ -191,6 +186,14 @@ test("cleanup cancels reconnect checks and delegated offset observation", async 
   expect(calls).toEqual([])
   route.remove()
 })
+
+async function settleUntil(predicate: () => boolean, attempts = 20) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    await frames(1)
+  }
+}
 
 async function frames(count: number) {
   for (let index = 0; index < count; index++) {
