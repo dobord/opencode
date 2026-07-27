@@ -294,6 +294,7 @@ describe("opencode run (non-interactive subprocess)", () => {
         })
 
         opencode.expectExit(result, 0)
+        expect(result.stdout).toBe("attachment received\n")
         const input = JSON.stringify(yield* llm.inputs)
         expect(input).toContain(sentinel)
         expect(input).not.toContain(`file://${source}`)

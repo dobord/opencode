@@ -135,6 +135,52 @@ describe("marketplace catalogs", () => {
     expect(result.listings).toEqual([])
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0]?.message).toContain("exceeds")
+
+    const streamed = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async () => new Response(new Uint8Array(2 * 1024 * 1024 + 1)),
+    })
+    expect(streamed.listings).toEqual([])
+    expect(streamed.errors[0]?.message).toContain("exceeds")
+  })
+
+  test("rejects executable and credential-bearing metadata links", () => {
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "links",
+        name: "Links",
+        publisher: { name: "Publisher", url: "data:text/html,unsafe" },
+        items: [],
+      }),
+    ).toThrow("HTTP or HTTPS")
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "links",
+        name: "Links",
+        items: [
+          {
+            id: "unsafe",
+            name: "Unsafe",
+            description: "Unsafe",
+            kind: "skill",
+            version: "1.0.0",
+            homepage: "javascript:alert(1)",
+            install: {},
+          },
+        ],
+      }),
+    ).toThrow("HTTP or HTTPS")
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "links",
+        name: "Links",
+        homepage: "https://user:secret@example.test/catalog",
+        items: [],
+      }),
+    ).toThrow("cannot contain credentials")
   })
 })
 
@@ -156,7 +202,9 @@ describe("marketplace installation", () => {
     expect(installed.config.plugin).toEqual([["example-plugin@2.0.0", { strict: true }]])
     expect(installed.config.agent?.reviewer).toEqual({ description: "Review changes", mode: "subagent" })
     expect(installed.config.command?.keep).toEqual({ template: "Keep me" })
-    expect(installed.config.marketplace?.installed?.[listing().key]?.version).toBe("1.0.0")
+    const receipt = installed.config.marketplace?.installed?.[listing().key]
+    expect(receipt?.version).toBe("1.0.0")
+    expect(receipt?.snapshot).not.toHaveProperty("install")
 
     const removed = uninstallMarketplaceItem(installed.config, listing().key)
     expect(removed.preserved).toEqual([])

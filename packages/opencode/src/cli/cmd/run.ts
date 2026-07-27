@@ -844,6 +844,7 @@ export const RunCommand = effectCmd({
             await completed
           }
 
+          let keepEvents = false
           try {
             if (args.command) {
               const result = await client.session.command({
@@ -860,6 +861,7 @@ export const RunCommand = effectCmd({
                 return
               }
               await finish()
+              keepEvents = Boolean(args.attach)
               return
             }
 
@@ -877,9 +879,10 @@ export const RunCommand = effectCmd({
               return
             }
             await finish()
+            keepEvents = Boolean(args.attach)
             return
           } finally {
-            await stopEvents()
+            if (!keepEvents) await stopEvents()
           }
         }
 

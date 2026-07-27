@@ -58,6 +58,8 @@ export type MarketplaceCatalogItem = {
   install: MarketplaceInstallPlan
 }
 
+export type MarketplaceInstalledSnapshot = Omit<MarketplaceCatalogItem, "install">
+
 export type MarketplaceCatalog = {
   schema: "opencode.marketplace/v1"
   id: string
@@ -105,7 +107,7 @@ export type MarketplaceInstalled = {
   fingerprint: string
   installed_at: string
   updated_at: string
-  snapshot?: MarketplaceCatalogItem
+  snapshot?: MarketplaceInstalledSnapshot
   plan: MarketplaceInstallPlan
   receipt: MarketplaceReceipt
 }
@@ -311,15 +313,17 @@ export async function loadMarketplace(input: {
       enabled: false,
       trust: installed.source_trust ?? "community",
     }
-    const item = installed.snapshot ?? {
-      id: installed.item,
-      name: installed.name,
-      description: "Installed marketplace item. Its catalog is currently unavailable or no longer lists it.",
-      kind: installed.kind,
-      version: installed.version,
-      ...(installed.publisher ? { publisher: { name: installed.publisher } } : {}),
-      install: clone(installed.plan),
-    }
+    const item = installed.snapshot
+      ? { ...clone(installed.snapshot), install: clone(installed.plan) }
+      : {
+          id: installed.item,
+          name: installed.name,
+          description: "Installed marketplace item. Its catalog is currently unavailable or no longer lists it.",
+          kind: installed.kind,
+          version: installed.version,
+          ...(installed.publisher ? { publisher: { name: installed.publisher } } : {}),
+          install: clone(installed.plan),
+        }
     listings.push({
       key,
       source,
@@ -360,13 +364,14 @@ export function parseMarketplaceCatalog(value: unknown): MarketplaceCatalog {
     if (ids.has(item.id)) throw new Error(`Duplicate marketplace item id: ${item.id}`)
     ids.add(item.id)
   }
+  const homepage = optionalWebURL(catalog.homepage, "catalog.homepage")
   return {
     schema: catalog.schema,
     id: identifier(catalog.id, "catalog.id"),
     name: text(catalog.name, "catalog.name"),
     ...(optionalText(catalog.description, "catalog.description") ? { description: catalog.description as string } : {}),
     ...(catalog.publisher === undefined ? {} : { publisher: parsePublisher(catalog.publisher, "catalog.publisher") }),
-    ...(optionalText(catalog.homepage, "catalog.homepage") ? { homepage: catalog.homepage as string } : {}),
+    ...(homepage ? { homepage } : {}),
     ...(optionalText(catalog.updated_at, "catalog.updated_at") ? { updated_at: catalog.updated_at as string } : {}),
     items,
   }
@@ -418,7 +423,7 @@ export function installMarketplaceItem(
         fingerprint: fingerprint(listing.item),
         installed_at: current?.installed_at ?? now,
         updated_at: now,
-        snapshot: clone(listing.item),
+        snapshot: marketplaceSnapshot(listing.item),
         plan: clone(listing.item.install),
         receipt,
       },
@@ -530,42 +535,40 @@ export function normalizeMarketplaceURL(value: string) {
 }
 
 function parseItem(value: unknown, index: number): MarketplaceCatalogItem {
-  const item = record(value, `catalog.items[${index}]`)
-  const kind = text(item.kind, `catalog.items[${index}].kind`)
+  const label = `catalog.items[${index}]`
+  const item = record(value, label)
+  const kind = text(item.kind, `${label}.kind`)
   if (!KINDS.has(kind as MarketplaceKind)) throw new Error(`Unsupported marketplace kind: ${kind}`)
+  const homepage = optionalWebURL(item.homepage, `${label}.homepage`)
+  const repository = optionalWebURL(item.repository, `${label}.repository`)
   return {
-    id: identifier(item.id, `catalog.items[${index}].id`),
-    name: text(item.name, `catalog.items[${index}].name`),
-    description: text(item.description, `catalog.items[${index}].description`),
+    id: identifier(item.id, `${label}.id`),
+    name: text(item.name, `${label}.name`),
+    description: text(item.description, `${label}.description`),
     kind: kind as MarketplaceKind,
-    version: text(item.version, `catalog.items[${index}].version`),
-    ...(item.publisher === undefined
-      ? {}
-      : { publisher: parsePublisher(item.publisher, `catalog.items[${index}].publisher`) }),
-    ...(optionalText(item.homepage, `catalog.items[${index}].homepage`) ? { homepage: item.homepage as string } : {}),
-    ...(optionalText(item.repository, `catalog.items[${index}].repository`)
-      ? { repository: item.repository as string }
-      : {}),
-    ...(optionalText(item.license, `catalog.items[${index}].license`) ? { license: item.license as string } : {}),
-    ...(item.tags === undefined ? {} : { tags: strings(item.tags, `catalog.items[${index}].tags`) }),
+    version: text(item.version, `${label}.version`),
+    ...(item.publisher === undefined ? {} : { publisher: parsePublisher(item.publisher, `${label}.publisher`) }),
+    ...(homepage ? { homepage } : {}),
+    ...(repository ? { repository } : {}),
+    ...(optionalText(item.license, `${label}.license`) ? { license: item.license as string } : {}),
+    ...(item.tags === undefined ? {} : { tags: strings(item.tags, `${label}.tags`) }),
     ...(typeof item.featured === "boolean" ? { featured: item.featured } : {}),
     ...(item.compatibility === undefined
       ? {}
-      : { compatibility: parseCompatibility(item.compatibility, `catalog.items[${index}].compatibility`) }),
-    ...(item.permissions === undefined
-      ? {}
-      : { permissions: strings(item.permissions, `catalog.items[${index}].permissions`) }),
-    ...(item.setup === undefined ? {} : { setup: strings(item.setup, `catalog.items[${index}].setup`) }),
+      : { compatibility: parseCompatibility(item.compatibility, `${label}.compatibility`) }),
+    ...(item.permissions === undefined ? {} : { permissions: strings(item.permissions, `${label}.permissions`) }),
+    ...(item.setup === undefined ? {} : { setup: strings(item.setup, `${label}.setup`) }),
     ...(typeof item.requires_restart === "boolean" ? { requires_restart: item.requires_restart } : {}),
-    install: parsePlan(item.install, `catalog.items[${index}].install`),
+    install: parsePlan(item.install, `${label}.install`),
   }
 }
 
 function parsePublisher(value: unknown, label: string): MarketplacePublisher {
   const publisher = record(value, label)
+  const url = optionalWebURL(publisher.url, `${label}.url`)
   return {
     name: text(publisher.name, `${label}.name`),
-    ...(optionalText(publisher.url, `${label}.url`) ? { url: publisher.url as string } : {}),
+    ...(url ? { url } : {}),
     ...(typeof publisher.verified === "boolean" ? { verified: publisher.verified } : {}),
   }
 }
@@ -774,11 +777,50 @@ async function readCatalogResponse(response: Response) {
   if (Number.isFinite(declared) && declared > MAX_CATALOG_BYTES) {
     throw new Error(`Marketplace catalog exceeds ${MAX_CATALOG_BYTES} bytes`)
   }
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > MAX_CATALOG_BYTES) {
-    throw new Error(`Marketplace catalog exceeds ${MAX_CATALOG_BYTES} bytes`)
+
+  const reader = response.body?.getReader()
+  if (!reader) return JSON.parse(await response.text())
+  const chunks: Uint8Array[] = []
+  let size = 0
+  while (true) {
+    const next = await reader.read()
+    if (next.done) break
+    size += next.value.byteLength
+    if (size > MAX_CATALOG_BYTES) {
+      await reader.cancel().catch(() => {})
+      throw new Error(`Marketplace catalog exceeds ${MAX_CATALOG_BYTES} bytes`)
+    }
+    chunks.push(next.value)
+  }
+
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
   }
   return JSON.parse(new TextDecoder().decode(bytes))
+}
+
+function optionalWebURL(value: unknown, label: string) {
+  if (value === undefined) return undefined
+  const raw = text(value, label)
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error(`${label} must be an absolute HTTP or HTTPS URL`)
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`${label} must use HTTP or HTTPS`)
+  }
+  if (parsed.username || parsed.password) throw new Error(`${label} cannot contain credentials`)
+  return parsed.href
+}
+
+function marketplaceSnapshot(item: MarketplaceCatalogItem): MarketplaceInstalledSnapshot {
+  const { install: _, ...snapshot } = item
+  return clone(snapshot)
 }
 
 function configuredTrust(value: MarketplaceTrust | undefined): MarketplaceConfiguredTrust {
