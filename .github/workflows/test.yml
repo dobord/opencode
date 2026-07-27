@@ -103,12 +103,15 @@ jobs:
           - name: linux
             host: blacksmith-4vcpu-ubuntu-2404
             fallback: ubuntu-latest
+            fallback_workers: 5
           - name: windows
             host: blacksmith-4vcpu-windows-2025
             fallback: windows-latest
+            fallback_workers: 4
     runs-on: ${{ github.repository == 'anomalyco/opencode' && matrix.settings.host || matrix.settings.fallback }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
+      PLAYWRIGHT_WORKERS: ${{ github.repository == 'anomalyco/opencode' && 5 || matrix.settings.fallback_workers }}
     defaults:
       run:
         shell: bash
