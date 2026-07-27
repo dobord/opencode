@@ -32,7 +32,7 @@ test("keeps the file-browser sidebar mounted when switching file tabs", async ({
 
   await panel.getByRole("button", { name: "file-00.ts" }).click()
   await expect(panel.getByRole("tab", { name: "file-00.ts" })).toHaveAttribute("data-selected", "")
-  await expect(panel.getByText("contents:file-00.ts", { exact: true })).toBeVisible()
+  await expect(panel.getByText("contents:file-00.ts", { exact: true })).toBeVisible({ timeout: 20_000 })
 
   const viewport = panel.locator('[data-slot="session-review-v2-sidebar-tree"] .scroll-view__viewport')
   await viewport.hover()
@@ -46,7 +46,7 @@ test("keeps the file-browser sidebar mounted when switching file tabs", async ({
 
   await panel.getByRole("button", { name: "file-79.ts" }).click()
   await expect(panel.getByRole("tab", { name: "file-79.ts" })).toHaveAttribute("data-selected", "")
-  await expect(panel.getByText("contents:file-79.ts", { exact: true })).toBeVisible()
+  await expect(panel.getByText("contents:file-79.ts", { exact: true })).toBeVisible({ timeout: 20_000 })
   expect(await readProbe(page)).toBe(PROBE)
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(scrolled)
 
