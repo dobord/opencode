@@ -1,21 +1,15 @@
-import { afterEach, expect, test } from "bun:test"
+import { expect, test } from "bun:test"
 import { type Virtualizer } from "@tanstack/solid-virtual"
 import { mutationNodesContainElement, observeElementOffsetReconnectAware } from "./observe-element-offset"
 
 type TestWindow = Window & typeof globalThis
 
-const TestWindowConstructor = globalThis.window.constructor as unknown as new () => TestWindow
-const windows = new Set<TestWindow>()
-
-afterEach(() => {
-  for (const testWindow of windows) testWindow.close()
-  windows.clear()
-})
-
 function createDOM() {
-  const testWindow = new TestWindowConstructor()
-  windows.add(testWindow)
-  return { testWindow, document: testWindow.document }
+  // The app unit suite shares one globally registered HappyDOM window. Use a
+  // separate document so neighboring tests that replace document.body cannot
+  // detach this test's scroll element while its MutationObserver is running.
+  const document = globalThis.document.implementation.createHTMLDocument("offset observer")
+  return { testWindow: globalThis.window, document }
 }
 
 test("matches only the scroll element or an ancestor containing it", () => {
