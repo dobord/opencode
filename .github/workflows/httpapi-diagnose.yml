@@ -1,0 +1,62 @@
+name: httpapi-diagnose
+
+on:
+  pull_request:
+    branches:
+      - marketplace
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  exercise:
+    name: httpapi (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [coverage, auth, effect]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Run HttpApi ${{ matrix.mode }} diagnostics
+        working-directory: packages/opencode
+        run: |
+          set -o pipefail
+          timeout --signal=TERM --kill-after=30s 20m \
+            bun run script/httpapi-exercise.ts \
+              --mode "${{ matrix.mode }}" \
+              --fail-on-missing \
+              --fail-on-skip \
+              --progress \
+              --trace \
+              --scenario-timeout "30 seconds" \
+            2>&1 | tee "$RUNNER_TEMP/httpapi-${{ matrix.mode }}.log"
+
+      - name: Upload HttpApi diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: httpapi-${{ matrix.mode }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/httpapi-${{ matrix.mode }}.log
+          if-no-files-found: warn
+          retention-days: 1
