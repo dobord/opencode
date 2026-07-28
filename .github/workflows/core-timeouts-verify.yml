@@ -1,0 +1,44 @@
+name: core-timeouts-verify
+
+on:
+  pull_request:
+    branches:
+      - marketplace
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Repeat core integration regressions
+        working-directory: packages/core
+        run: |
+          for attempt in 1 2 3; do
+            echo "core integration attempt $attempt"
+            bun test --timeout 30000 test/session-create.test.ts \
+              --test-name-pattern "replays one prompt lifecycle into a fresh target database"
+            bun test --timeout 30000 test/snapshot.test.ts \
+              --test-name-pattern "captures and restores Location-scoped changes"
+          done
