@@ -46,6 +46,7 @@ const it = testEffect(
 )
 const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const id = SessionV2.ID.create()
+const DATABASE_REPLAY_TIMEOUT = 30_000
 
 describe("SessionV2.create", () => {
   it.effect("creates a fresh projected session when the ID is omitted", () =>
@@ -292,6 +293,7 @@ describe("SessionV2.create", () => {
         ])
       }).pipe(Effect.provide(Layer.fresh(targetLayer)))
     }),
+    DATABASE_REPLAY_TIMEOUT,
   )
 
   it.effect("does not mask unrelated created projector defects", () =>

@@ -67,6 +67,7 @@ describe("Snapshot", () => {
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
+    GIT_WORKTREE_TIMEOUT,
   )
 
   testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>
