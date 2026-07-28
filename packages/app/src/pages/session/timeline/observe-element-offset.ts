@@ -21,10 +21,16 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
 
   let removed = false
   let frame: number | undefined
+  let reconnectFrame: number | undefined
   const clearCheck = () => {
     if (frame === undefined) return
     targetWindow.cancelAnimationFrame(frame)
     frame = undefined
+  }
+  const clearReconnect = () => {
+    if (reconnectFrame === undefined) return
+    targetWindow.cancelAnimationFrame(reconnectFrame)
+    reconnectFrame = undefined
   }
   const startCheck = () => {
     clearCheck()
@@ -44,28 +50,34 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
     }
     frame = targetWindow.requestAnimationFrame(check)
   }
+  const reconcileReconnect = () => {
+    reconnectFrame = undefined
+    if (!removed || !element.isConnected) return
+    removed = false
+    startCheck()
+  }
+  const scheduleReconnect = () => {
+    if (reconnectFrame !== undefined) return
+    reconnectFrame = targetWindow.requestAnimationFrame(reconcileReconnect)
+  }
   const observer = new targetWindow.MutationObserver((records) => {
     if (!active) return
 
-    // A renderer may remove and reinsert the route within one mutation batch,
-    // and MutationObserver implementations are not required to expose those
-    // records in the same order. Collect both facts before updating state so an
-    // addition observed before its removal cannot lose the reconnect check.
-    let sawRemoval = false
-    let sawAddition = false
+    let relevant = false
     for (const record of records) {
       if (record.target === element || element.contains(record.target)) continue
-      sawRemoval ||= mutationNodesContainElement(record.removedNodes, element)
-      sawAddition ||= mutationNodesContainElement(record.addedNodes, element)
+      if (mutationNodesContainElement(record.removedNodes, element)) {
+        removed = true
+        clearCheck()
+        relevant = true
+      }
+      if (mutationNodesContainElement(record.addedNodes, element)) relevant = true
     }
 
-    if (sawRemoval) {
-      removed = true
-      clearCheck()
-    }
-    if (!removed || !element.isConnected || !sawAddition) return
-    removed = false
-    startCheck()
+    // HappyDOM and browsers may report a synchronous move in one batch, split it
+    // across callbacks, or expose addition before removal. Reconcile after mutation
+    // delivery and rely on the element's final connection state instead of record order.
+    if (relevant) scheduleReconnect()
   })
   // Session routes are replaced below persistent main; body is the fallback for isolated hosts.
   observer.observe(root, { childList: true, subtree: true })
@@ -73,6 +85,7 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
   return () => {
     active = false
     observer.disconnect()
+    clearReconnect()
     clearCheck()
     cleanupOffset?.()
   }
