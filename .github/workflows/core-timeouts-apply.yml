@@ -36,13 +36,13 @@ jobs:
             ),
           )
 
-          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''
+          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''.replace("            ),", "    ),").replace("          )\n\n          testEffect", "  )\n\n  testEffect")
           new = '''      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
             ),
             GIT_WORKTREE_TIMEOUT,
           )
 
-          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''
+          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''.replace("            ),", "    ),").replace("            GIT_WORKTREE_TIMEOUT,", "    GIT_WORKTREE_TIMEOUT,").replace("          )\n\n          testEffect", "  )\n\n  testEffect")
           if text.count(old) != 1:
               raise SystemExit(f"snapshot anchor count was {text.count(old)}, expected 1")
           snapshot.write_text(text.replace(old, new, 1))
@@ -57,13 +57,13 @@ jobs:
             }),
           )
 
-          it.effect("does not mask unrelated created projector defects", () =>'''
+          it.effect("does not mask unrelated created projector defects", () =>'''.replace("            }),", "    }),").replace("          )\n\n          it.effect", "  )\n\n  it.effect")
           new = '''      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
             }),
             DATABASE_REPLAY_TIMEOUT,
           )
 
-          it.effect("does not mask unrelated created projector defects", () =>'''
+          it.effect("does not mask unrelated created projector defects", () =>'''.replace("            }),", "    }),").replace("            DATABASE_REPLAY_TIMEOUT,", "    DATABASE_REPLAY_TIMEOUT,").replace("          )\n\n          it.effect", "  )\n\n  it.effect")
           if text.count(old) != 1:
               raise SystemExit(f"session replay anchor count was {text.count(old)}, expected 1")
           session.write_text(text.replace(old, new, 1))
