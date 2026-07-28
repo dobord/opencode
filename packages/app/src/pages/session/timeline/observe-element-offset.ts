@@ -46,16 +46,26 @@ export function observeElementOffsetReconnectAware<TScrollElement extends Elemen
   }
   const observer = new targetWindow.MutationObserver((records) => {
     if (!active) return
-    records.forEach((record) => {
-      if (record.target === element || element.contains(record.target)) return
-      if (mutationNodesContainElement(record.removedNodes, element)) {
-        removed = true
-        clearCheck()
-      }
-      if (!removed || !element.isConnected || !mutationNodesContainElement(record.addedNodes, element)) return
-      removed = false
-      startCheck()
-    })
+
+    // A renderer may remove and reinsert the route within one mutation batch,
+    // and MutationObserver implementations are not required to expose those
+    // records in the same order. Collect both facts before updating state so an
+    // addition observed before its removal cannot lose the reconnect check.
+    let sawRemoval = false
+    let sawAddition = false
+    for (const record of records) {
+      if (record.target === element || element.contains(record.target)) continue
+      sawRemoval ||= mutationNodesContainElement(record.removedNodes, element)
+      sawAddition ||= mutationNodesContainElement(record.addedNodes, element)
+    }
+
+    if (sawRemoval) {
+      removed = true
+      clearCheck()
+    }
+    if (!removed || !element.isConnected || !sawAddition) return
+    removed = false
+    startCheck()
   })
   // Session routes are replaced below persistent main; body is the fallback for isolated hosts.
   observer.observe(root, { childList: true, subtree: true })
