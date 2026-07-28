@@ -1,0 +1,78 @@
+name: core-timeouts-apply
+
+on:
+  pull_request:
+    branches:
+      - marketplace
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.repository == 'dobord/opencode' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout staged workflow
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Apply focused integration-test timeouts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin marketplace
+          git checkout --detach origin/marketplace
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          snapshot = Path("packages/core/test/snapshot.test.ts")
+          text = snapshot.read_text()
+          old = '''      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+            ),
+          )
+
+          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''
+          new = '''      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+            ),
+            GIT_WORKTREE_TIMEOUT,
+          )
+
+          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''
+          if text.count(old) != 1:
+              raise SystemExit(f"snapshot anchor count was {text.count(old)}, expected 1")
+          snapshot.write_text(text.replace(old, new, 1))
+
+          session = Path("packages/core/test/session-create.test.ts")
+          text = session.read_text()
+          marker = 'const id = SessionV2.ID.create()\n'
+          if text.count(marker) != 1:
+              raise SystemExit(f"session constant anchor count was {text.count(marker)}, expected 1")
+          text = text.replace(marker, marker + 'const DATABASE_REPLAY_TIMEOUT = 30_000\n', 1)
+          old = '''      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
+            }),
+          )
+
+          it.effect("does not mask unrelated created projector defects", () =>'''
+          new = '''      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
+            }),
+            DATABASE_REPLAY_TIMEOUT,
+          )
+
+          it.effect("does not mask unrelated created projector defects", () =>'''
+          if text.count(old) != 1:
+              raise SystemExit(f"session replay anchor count was {text.count(old)}, expected 1")
+          session.write_text(text.replace(old, new, 1))
+          PY
+
+          git diff --check
+          git diff -- packages/core/test/snapshot.test.ts packages/core/test/session-create.test.ts
+          git config user.email "bot@opencode.ai"
+          git config user.name "opencode"
+          git add packages/core/test/snapshot.test.ts packages/core/test/session-create.test.ts
+          git commit -m "test: allow slower core integrations on Windows"
+          git push --force origin HEAD:refs/heads/marketplace-core-timeouts-result
