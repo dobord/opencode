@@ -30,29 +30,41 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("packages/core/test/snapshot.test.ts")
-          s = p.read_text()
-          anchor = '\n  testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'
-          if s.count(anchor) != 1:
-              raise SystemExit("snapshot anchor mismatch")
-          before, after = s.split(anchor, 1)
-          if not before.endswith("  )"):
-              raise SystemExit("snapshot closure mismatch")
-          p.write_text(before[:-3] + "    GIT_WORKTREE_TIMEOUT,\n  )" + anchor + after)
+          def insert_before_previous_closure(lines: list[str], next_test: str, timeout: str) -> list[str]:
+              matches = [i for i, line in enumerate(lines) if line == next_test]
+              if len(matches) != 1:
+                  raise SystemExit(f"test boundary {next_test!r} matched {len(matches)} lines")
+              boundary = matches[0]
+              index = boundary - 1
+              while index >= 0 and lines[index] == "":
+                  index -= 1
+              if index < 0 or lines[index] != "  )":
+                  raise SystemExit(f"test before {next_test!r} has unexpected closure {lines[index]!r}")
+              lines.insert(index, f"    {timeout},")
+              return lines
 
-          p = Path("packages/core/test/session-create.test.ts")
-          s = p.read_text()
-          marker = 'const id = SessionV2.ID.create()\n'
-          if s.count(marker) != 1:
-              raise SystemExit("session constant anchor mismatch")
-          s = s.replace(marker, marker + 'const DATABASE_REPLAY_TIMEOUT = 30_000\n', 1)
-          anchor = '\n  it.effect("does not mask unrelated created projector defects", () =>'
-          if s.count(anchor) != 1:
-              raise SystemExit("session test anchor mismatch")
-          before, after = s.split(anchor, 1)
-          if not before.endswith("  )"):
-              raise SystemExit("session closure mismatch")
-          p.write_text(before[:-3] + "    DATABASE_REPLAY_TIMEOUT,\n  )" + anchor + after)
+          snapshot = Path("packages/core/test/snapshot.test.ts")
+          lines = snapshot.read_text().splitlines()
+          lines = insert_before_previous_closure(
+              lines,
+              '  testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>',
+              "GIT_WORKTREE_TIMEOUT",
+          )
+          snapshot.write_text("\n".join(lines) + "\n")
+
+          session = Path("packages/core/test/session-create.test.ts")
+          lines = session.read_text().splitlines()
+          marker = "const id = SessionV2.ID.create()"
+          matches = [i for i, line in enumerate(lines) if line == marker]
+          if len(matches) != 1:
+              raise SystemExit(f"session constant matched {len(matches)} lines")
+          lines.insert(matches[0] + 1, "const DATABASE_REPLAY_TIMEOUT = 30_000")
+          lines = insert_before_previous_closure(
+              lines,
+              '  it.effect("does not mask unrelated created projector defects", () =>',
+              "DATABASE_REPLAY_TIMEOUT",
+          )
+          session.write_text("\n".join(lines) + "\n")
           PY
 
           git diff --check
