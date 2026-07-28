@@ -36,13 +36,22 @@ test("opens the comment editor for a line number range", async ({ page }) => {
   await expectAppVisible(start)
   await expectAppVisible(end)
 
-  const from = await start.boundingBox()
-  const to = await end.boundingBox()
-  if (!from || !to) throw new Error("Missing line number bounds")
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2)
-  await page.mouse.up()
+  // The virtualized diff can replace a visible line-number node between the
+  // visibility assertion and boundingBox(). Re-resolve both locators and the
+  // complete pointer gesture as one retryable interaction.
+  await expect(async () => {
+    await expect(start).toBeVisible({ timeout: 500 })
+    await expect(end).toBeVisible({ timeout: 500 })
+    const from = await start.boundingBox()
+    const to = await end.boundingBox()
+    if (!from || !to) throw new Error("Missing line number bounds")
+
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2)
+    await page.mouse.up()
+    await expect(review.getByRole("textbox")).toBeVisible({ timeout: 750 })
+  }).toPass({ timeout: 5_000 })
 
   await expect(review.getByRole("textbox")).toBeVisible()
 })
