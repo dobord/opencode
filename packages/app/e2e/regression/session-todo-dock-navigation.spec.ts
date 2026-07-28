@@ -21,6 +21,12 @@ type EventPayload = {
   payload: Record<string, unknown>
 }
 
+type DockSample = {
+  present: boolean
+  height: number
+  opacity: number
+}
+
 test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: "no-preference" })
 
 test("animates todo lifecycle without replaying it across session tabs", async ({ page }) => {
@@ -76,38 +82,38 @@ test("animates todo lifecycle without replaying it across session tabs", async (
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible()
 
   await page.waitForTimeout(700)
-  const opening = sampleDock(page, 1_000)
+  const opening = await startDockSampler(page, 1_000)
   todos[sourceID] = activeTodos
   events.push(todoEvent(sourceID, activeTodos))
   await expect(dock).toBeVisible()
   await expect(dock.locator('[data-state="in_progress"]')).toHaveCount(1)
-  expect((await opening).some((sample) => sample.opacity > 0.05 && sample.opacity < 0.95)).toBe(true)
+  expect((await opening()).some((sample) => sample.opacity > 0.05 && sample.opacity < 0.95)).toBe(true)
 
   await switchSession(page, otherID, otherTitle)
   await expect(dock).toHaveCount(0)
 
-  const returningOpen = sampleDock(page, 700)
+  const returningOpen = await startDockSampler(page, 2_000)
   await switchSession(page, sourceID, sourceTitle)
-  const openSamples = (await returningOpen).filter((sample) => sample.present)
+  const openSamples = (await returningOpen()).filter((sample) => sample.present)
   expect(openSamples.length).toBeGreaterThan(0)
   expect(openSamples[0]!.opacity).toBeGreaterThan(0.98)
   expect(openSamples[0]!.height).toBeGreaterThan(70)
   await expect(dock.locator('[data-state="in_progress"]')).toHaveCount(1)
 
   const completedTodos = activeTodos.map((todo) => ({ ...todo, status: "completed" }))
-  const closing = sampleDock(page, 1_000)
+  const closing = await startDockSampler(page, 1_000)
   todos[sourceID] = completedTodos
   events.push(todoEvent(sourceID, completedTodos))
   await expect(dock).toHaveCount(0)
-  expect((await closing).some((sample) => sample.opacity > 0.05 && sample.opacity < 0.95)).toBe(true)
+  expect((await closing()).some((sample) => sample.opacity > 0.05 && sample.opacity < 0.95)).toBe(true)
   todos[sourceID] = []
   events.push(todoEvent(sourceID, []))
 
   await switchSession(page, otherID, otherTitle)
-  const returningEmpty = sampleDock(page, 700)
+  const returningEmpty = await startDockSampler(page, 2_000)
   await switchSession(page, sourceID, sourceTitle)
   await expect(dock).toHaveCount(0)
-  expect((await returningEmpty).every((sample) => !sample.present)).toBe(true)
+  expect((await returningEmpty()).every((sample) => !sample.present)).toBe(true)
 })
 
 function session(id: string, title: string, created: number) {
@@ -170,21 +176,36 @@ async function switchSession(page: Page, sessionID: string, title: string) {
   await expectSessionTitle(page, title)
 }
 
-function sampleDock(page: Page, duration: number) {
-  return page.evaluate(async (duration) => {
-    const samples: { present: boolean; height: number; opacity: number }[] = []
+async function startDockSampler(page: Page, duration: number) {
+  // Start the requestAnimationFrame loop and return immediately. Awaiting one
+  // long page.evaluate() while issuing navigation commands from Playwright is
+  // protocol-order dependent and can finish all sampling before the tab click.
+  const state = await page.evaluateHandle((duration) => {
+    const state: { done: boolean; samples: DockSample[] } = { done: false, samples: [] }
     const start = performance.now()
-    while (performance.now() - start < duration) {
+    const tick = () => {
       const dock = document.querySelector<HTMLElement>('[data-component="session-todo-dock"]')
       const clip = dock?.parentElement?.parentElement
       const label = dock?.querySelector<HTMLElement>('[data-action="session-todo-toggle"] span[aria-label]')
-      samples.push({
+      state.samples.push({
         present: !!dock,
         height: clip?.getBoundingClientRect().height ?? 0,
         opacity: label ? Number.parseFloat(getComputedStyle(label).opacity) : 0,
       })
-      await new Promise(requestAnimationFrame)
+      if (performance.now() - start < duration) {
+        requestAnimationFrame(tick)
+        return
+      }
+      state.done = true
     }
-    return samples
+    tick()
+    return state
   }, duration)
+
+  return async () => {
+    await expect.poll(() => state.evaluate((value) => value.done), { timeout: duration + 5_000 }).toBe(true)
+    const samples = await state.evaluate((value) => value.samples)
+    await state.dispose()
+    return samples
+  }
 }
