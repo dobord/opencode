@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - marketplace-e2e-deterministic
+  pull_request:
+    branches:
+      - marketplace-windows-unit-stable
 
 permissions:
   contents: read
