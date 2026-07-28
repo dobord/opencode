@@ -30,43 +30,29 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          snapshot = Path("packages/core/test/snapshot.test.ts")
-          text = snapshot.read_text()
-          old = '''      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-            ),
-          )
+          p = Path("packages/core/test/snapshot.test.ts")
+          s = p.read_text()
+          anchor = '\n  testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'
+          if s.count(anchor) != 1:
+              raise SystemExit("snapshot anchor mismatch")
+          before, after = s.split(anchor, 1)
+          if not before.endswith("  )"):
+              raise SystemExit("snapshot closure mismatch")
+          p.write_text(before[:-3] + "    GIT_WORKTREE_TIMEOUT,\n  )" + anchor + after)
 
-          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''.replace("            ),", "    ),").replace("          )\n\n          testEffect", "  )\n\n  testEffect")
-          new = '''      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-            ),
-            GIT_WORKTREE_TIMEOUT,
-          )
-
-          testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>'''.replace("            ),", "    ),").replace("            GIT_WORKTREE_TIMEOUT,", "    GIT_WORKTREE_TIMEOUT,").replace("          )\n\n          testEffect", "  )\n\n  testEffect")
-          if text.count(old) != 1:
-              raise SystemExit(f"snapshot anchor count was {text.count(old)}, expected 1")
-          snapshot.write_text(text.replace(old, new, 1))
-
-          session = Path("packages/core/test/session-create.test.ts")
-          text = session.read_text()
+          p = Path("packages/core/test/session-create.test.ts")
+          s = p.read_text()
           marker = 'const id = SessionV2.ID.create()\n'
-          if text.count(marker) != 1:
-              raise SystemExit(f"session constant anchor count was {text.count(marker)}, expected 1")
-          text = text.replace(marker, marker + 'const DATABASE_REPLAY_TIMEOUT = 30_000\n', 1)
-          old = '''      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
-            }),
-          )
-
-          it.effect("does not mask unrelated created projector defects", () =>'''.replace("            }),", "    }),").replace("          )\n\n          it.effect", "  )\n\n  it.effect")
-          new = '''      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
-            }),
-            DATABASE_REPLAY_TIMEOUT,
-          )
-
-          it.effect("does not mask unrelated created projector defects", () =>'''.replace("            }),", "    }),").replace("            DATABASE_REPLAY_TIMEOUT,", "    DATABASE_REPLAY_TIMEOUT,").replace("          )\n\n          it.effect", "  )\n\n  it.effect")
-          if text.count(old) != 1:
-              raise SystemExit(f"session replay anchor count was {text.count(old)}, expected 1")
-          session.write_text(text.replace(old, new, 1))
+          if s.count(marker) != 1:
+              raise SystemExit("session constant anchor mismatch")
+          s = s.replace(marker, marker + 'const DATABASE_REPLAY_TIMEOUT = 30_000\n', 1)
+          anchor = '\n  it.effect("does not mask unrelated created projector defects", () =>'
+          if s.count(anchor) != 1:
+              raise SystemExit("session test anchor mismatch")
+          before, after = s.split(anchor, 1)
+          if not before.endswith("  )"):
+              raise SystemExit("session closure mismatch")
+          p.write_text(before[:-3] + "    DATABASE_REPLAY_TIMEOUT,\n  )" + anchor + after)
           PY
 
           git diff --check
