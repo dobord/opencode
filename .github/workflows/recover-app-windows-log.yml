@@ -1,9 +1,9 @@
 name: recover-app-windows-log
 
 on:
-  push:
+  pull_request:
     branches:
-      - recover-app-windows-log
+      - marketplace
 
 permissions:
   actions: read
