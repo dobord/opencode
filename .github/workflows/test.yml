@@ -34,7 +34,9 @@ jobs:
           - name: windows
             host: blacksmith-4vcpu-windows-2025
             fallback: windows-latest
-            fallback_concurrency: 2
+            # The hosted Windows runner becomes unstable when the two largest
+            # Bun suites compete for CPU, Git, SQLite, and child-process slots.
+            fallback_concurrency: 1
     runs-on: ${{ github.repository == 'anomalyco/opencode' && matrix.settings.host || matrix.settings.fallback }}
     defaults:
       run:
