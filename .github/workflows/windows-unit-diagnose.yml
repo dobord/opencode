@@ -1,0 +1,76 @@
+name: windows-unit-diagnose
+
+on:
+  pull_request:
+    branches:
+      - marketplace
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: true
+
+jobs:
+  diagnose:
+    name: windows diagnose (${{ matrix.case }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - instance
+          - instance-vcs
+          - shell-queue
+          - skill-refresh
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Run focused regression
+        working-directory: packages/opencode
+        run: |
+          set -euo pipefail
+          case "${{ matrix.case }}" in
+            instance)
+              for attempt in 1 2 3; do
+                echo "=== instance attempt $attempt ==="
+                bun test test/project/instance-bootstrap.test.ts --timeout 120000 --only-failures
+              done
+              ;;
+            instance-vcs)
+              bun test test/project/instance-bootstrap.test.ts test/project/vcs.test.ts --timeout 120000 --only-failures
+              ;;
+            shell-queue)
+              for attempt in 1 2 3; do
+                echo "=== shell queue attempt $attempt ==="
+                bun test test/session/prompt.test.ts \
+                  --test-name-pattern "loop waits while shell runs and starts after shell exits|shell completion resumes queued loop callers" \
+                  --timeout 120000 --only-failures
+              done
+              ;;
+            skill-refresh)
+              for attempt in 1 2 3 4 5; do
+                echo "=== skill refresh attempt $attempt ==="
+                bun test test/skill/discovery.test.ts --timeout 120000 --only-failures
+              done
+              ;;
+          esac
