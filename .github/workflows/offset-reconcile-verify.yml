@@ -1,0 +1,77 @@
+name: offset-reconcile-verify
+
+on:
+  pull_request:
+    branches:
+      - marketplace
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  verify:
+    name: offset reconcile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Check app types
+        if: runner.os == 'Linux'
+        working-directory: packages/app
+        run: bun run typecheck
+
+      - name: Repeat reconnect regression
+        working-directory: packages/app
+        run: |
+          set +e
+          log="$RUNNER_TEMP/offset-reconcile-${RUNNER_OS}.log"
+          status=0
+          for attempt in $(seq 1 100); do
+            echo "=== reconnect attempt $attempt ===" | tee -a "$log"
+            bun test \
+              --only-failures \
+              --preload ./happydom.ts \
+              ./src/pages/session/timeline/observe-element-offset.test.ts \
+              2>&1 | tee -a "$log"
+            code=${PIPESTATUS[0]}
+            if [ "$code" -ne 0 ]; then
+              status=$code
+              break
+            fi
+          done
+          exit "$status"
+
+      - name: Run complete app unit suite
+        working-directory: packages/app
+        run: bun run test:unit
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: offset-reconcile-${{ runner.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/offset-reconcile-${{ runner.os }}.log
+          if-no-files-found: ignore
+          retention-days: 1
