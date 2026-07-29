@@ -1,82 +1,94 @@
 ---
 title: Marketplace
-description: Discover, install, update, and remove OpenCode extensions
+description: Publish, install, and control OpenCode plugins, skills, and MCP servers.
 ---
 
-The OpenCode marketplace is a catalog-based package manager for reusable ecosystem assets:
+The Marketplace installs related plugins, skills, MCP servers, commands, agents, and instructions as one managed
+package. Open **Settings → Marketplace** in the desktop app, or run **Marketplace** from the TUI command palette.
 
-- plugins
-- skills
-- agents and subagents
-- slash commands
-- MCP servers
-- configuration bundles containing several asset types
+An installed package can remain installed while it is disabled. You can also enable or disable each declared skill
+and MCP server independently.
 
-Marketplace installs update your normal OpenCode configuration. There is no separate runtime or proprietary package format.
-
-## Open the marketplace
-
-In the desktop or web app, open **Settings → Marketplace**.
-
-In the terminal UI, open the command palette and select **Marketplace**. Use **Marketplace sources** to add or disable catalogs.
-
-Both interfaces support search, filtering, install, update, uninstall, source management, provenance, trust labels, permission summaries, and conflict confirmation.
+---
 
 ## Add a catalog
 
-A marketplace source can be:
+Open the **Sources** tab in the desktop app. In the TUI, open **Marketplace sources** or press `Ctrl+S` from the
+Marketplace.
 
-- a direct HTTPS URL to a catalog JSON file
-- an HTTP loopback URL for local development, such as `http://127.0.0.1:4096/catalog.json`
-- a GitHub repository URL containing `.opencode/marketplace.json`
-- `github:owner/repository`
-- `github:owner/repository/path/to/catalog.json`
+You can also add a source without opening the TUI:
 
-Catalogs are marked as `official`, `verified`, `community`, or `private`. `official` and `verified` provenance is reserved for catalogs distributed by OpenCode; user-configured sources can be `community` or `private`. The label does not sandbox installed code.
+```bash
+opencode plugin marketplace add https://git.example.com/ai/agent-marketplace.git
+```
 
-Private catalogs can include request headers in the `marketplace.sources` configuration. Catalog URLs cannot embed usernames or passwords, and headers are never sent over non-loopback HTTP. Keep credentials out of project configuration and prefer environment-backed server configuration when possible.
+A source can be:
+
+- an HTTPS URL to a Marketplace JSON file;
+- a GitHub repository URL;
+- `github:owner/repository`;
+- an HTTP loopback URL for local development.
+
+For Git repository URLs ending in `.git`, OpenCode looks for `.opencode/marketplace.json` through the conventional
+GitHub, GitLab, and Gitea raw-file routes. You can pass `--name` to set a display name or `--trust private` for a
+private catalog.
+
+OpenCode preserves installation receipts even if a source is disabled, unavailable, or removes an item. This lets
+you safely manage or uninstall an existing package.
+
+Catalogs are labelled `official`, `verified`, `community`, or `private`. Official and verified provenance is
+reserved for catalogs distributed by OpenCode; user-added catalogs can be community or private. The label does not
+sandbox installed code. Private sources can include request headers in `marketplace.sources`; keep credentials out
+of project configuration.
+
+---
 
 ## Catalog format
 
-Catalogs use the `opencode.marketplace/v1` schema:
+A catalog uses the `opencode.marketplace/v1` schema:
 
-```json
+```json title=".opencode/marketplace.json"
 {
   "schema": "opencode.marketplace/v1",
-  "id": "acme-tools",
-  "name": "Acme developer tools",
-  "publisher": {
-    "name": "Acme",
-    "url": "https://example.com",
-    "verified": true
-  },
+  "id": "acme",
+  "name": "Acme Marketplace",
   "items": [
     {
-      "id": "review-kit",
-      "name": "Review kit",
-      "description": "Adds a review agent, command, and documentation MCP server.",
-      "kind": "bundle",
-      "version": "1.2.0",
-      "repository": "https://github.com/acme/review-kit",
-      "license": "MIT",
-      "permissions": ["Connects to the Acme documentation service"],
-      "setup": ["Set ACME_DOCS_TOKEN before using the MCP server"],
+      "id": "review-suite",
+      "name": "Review Suite",
+      "description": "Review changes with reusable workflows and documentation tools.",
+      "kind": "plugin",
+      "version": "1.0.0",
+      "publisher": {
+        "name": "Acme"
+      },
+      "icon": {
+        "src-light": "./assets/review-suite-light.png",
+        "src-dark": "./assets/review-suite-dark.png"
+      },
+      "brand_color": "#10A37F",
       "install": {
-        "agents": {
-          "reviewer": {
-            "description": "Review code changes",
-            "mode": "subagent"
-          }
-        },
-        "commands": {
-          "review": {
-            "template": "Review the current changes"
-          }
+        "plugins": ["@acme/opencode-review@1.0.0"],
+        "skills": {
+          "items": [
+            {
+              "id": "review",
+              "name": "review",
+              "description": "Review the current changes.",
+              "path": "./skills/review"
+            },
+            {
+              "id": "release-notes",
+              "name": "release-notes",
+              "description": "Prepare release notes.",
+              "path": "./skills/release-notes"
+            }
+          ]
         },
         "mcp": {
-          "acme-docs": {
+          "docs": {
             "type": "remote",
-            "url": "https://example.com/mcp"
+            "url": "https://docs.example.com/mcp"
           }
         }
       }
@@ -85,55 +97,91 @@ Catalogs use the `opencode.marketplace/v1` schema:
 }
 ```
 
-Each item needs an `id`, `name`, `description`, `kind`, `version`, and `install` plan. Supported kinds are `plugin`, `skill`, `agent`, `command`, `mcp`, and `bundle`. Catalog and item IDs are limited to 128 characters and cannot contain colons or control characters. Catalog responses are size- and item-count-limited before they are accepted.
+Use a stable, colon-free identifier for the catalog, each item, and each skill.
 
-## Install plans
+### Plugin icons
 
-An install plan can update these OpenCode configuration fields:
+Each item can have its own arbitrary image. For one image, use the short form:
 
 ```json
 {
-  "plugins": ["example-plugin@1.0.0"],
-  "skills": {
-    "paths": ["./shared-skills"],
-    "urls": ["https://example.com/skills/"]
-  },
-  "agents": {
-    "reviewer": {
-      "description": "Review code",
-      "mode": "subagent"
-    }
-  },
-  "commands": {
-    "review": {
-      "template": "Review the current changes"
-    }
-  },
-  "mcp": {
-    "docs": {
-      "type": "remote",
-      "url": "https://example.com/mcp"
-    }
-  },
-  "instructions": [".opencode/review.md"]
+  "icon": "./assets/review-suite.png"
 }
 ```
 
-Plugin entries accept the same package strings and `[package, options]` tuples as the `plugin` configuration field.
+To provide theme-specific artwork, use `src-light` and optionally `src-dark`:
 
-## Conflicts and uninstall receipts
+```json
+{
+  "icon": {
+    "src-light": "./assets/review-suite-light.png",
+    "src-dark": "./assets/review-suite-dark.png"
+  }
+}
+```
 
-Before an install replaces an existing plugin, agent, command, or MCP server, OpenCode displays the conflicting paths and requires confirmation.
+Icon values can be a `./` path relative to the catalog file, an absolute HTTP or HTTPS URL, or a base64 PNG, JPEG,
+WebP, or GIF data URL. Relative paths must stay inside the catalog directory. If an image is missing or cannot be
+loaded, the desktop app displays a colored initial-based fallback. `brand_color` accepts a six-digit hex color for
+that fallback and the icon background.
 
-Each successful install records a receipt and item snapshot in `marketplace.installed`. During uninstall, OpenCode restores the previous values only when the installed values are still unchanged. Settings edited by the user after installation are preserved and reported instead of being overwritten.
+### Individually controlled skills
 
-Installed items remain visible and removable even when their source is disabled, deleted, offline, or no longer publishes the item. OpenCode reconstructs an Installed entry from the saved receipt instead of orphaning the configuration.
+Declare skills under `install.skills.items` so the GUI and TUI can show a named switch for each one. Each item needs
+an `id` and the actual skill `name`; it can point to a dedicated `path` or `url`. Multiple skills may share a source.
+When a named skill is disabled, OpenCode also filters it from runtime skill discovery.
 
-Updates use the same receipt mechanism. Semantic versions are compared when possible, and changed item fingerprints are also detected so a republished catalog entry can be surfaced as an update. A catalog cannot turn **Update all** into an implicit downgrade: lower semantic versions remain installed. Updates from community and private sources still require explicit review.
+Legacy `install.skills.paths` and `install.skills.urls` arrays remain supported. Each unlabelled source appears as
+one switch derived from its path or URL.
+
+### Other install-plan fields
+
+An install plan can also define:
+
+- `plugins`: package strings or `[package, options]` tuples accepted by the `plugin` configuration field;
+- `agents`: named agent and subagent configuration;
+- `commands`: named slash commands;
+- `mcp`: named local or remote MCP server configuration;
+- `instructions`: persistent instruction paths or URLs.
+
+Before an install replaces an existing plugin, agent, command, or MCP server, OpenCode shows the conflicting paths
+and requires confirmation.
+
+---
+
+## Enable and disable components
+
+The desktop details panel contains switches for the complete plugin, every declared skill, and every MCP server.
+
+In the TUI:
+
+- press `Enter` on an installed item to manage its components;
+- press `Space` in the Marketplace list to enable or disable the whole plugin;
+- press `Enter` on a component to toggle it;
+- press `Ctrl+D` in the component view to uninstall the package.
+
+Disabling the complete plugin removes its active configuration but keeps the installation receipt and individual
+choices. Enabling it restores the plugin and all skills that were not disabled individually.
+
+Enabled MCP servers start automatically when the plugin is enabled. If you explicitly disable an MCP server, that
+choice is remembered: toggling the complete plugin off and on does not start that server. Enabling the MCP switch
+again makes it eligible for automatic startup.
+
+Uninstalling restores previous values recorded by the installation receipt. Values changed by the user after
+installation are preserved rather than overwritten.
+
+## Updates and unavailable catalogs
+
+Marketplace updates use the same receipt mechanism as installation. OpenCode compares semantic versions when
+possible and also detects changed item fingerprints. A catalog cannot turn **Update all** into an implicit
+downgrade: a lower semantic version remains installed.
+
+Installed items remain visible and removable when their source is disabled, deleted, offline, or no longer
+publishes the item. OpenCode reconstructs the entry from its local receipt and snapshot.
 
 ## Security
 
-A marketplace is a discovery and configuration mechanism, not a sandbox.
+Marketplace is a discovery and configuration mechanism, not a sandbox.
 
 - Plugins execute code inside OpenCode.
 - Local MCP servers execute commands on your machine.
@@ -141,4 +189,5 @@ A marketplace is a discovery and configuration mechanism, not a sandbox.
 - Skills and instructions influence agent behavior.
 - Agents and commands can change model, tool, and permission configuration.
 
-Review the publisher, source catalog, repository, requested capabilities, and resulting configuration before confirming an install. Prefer official or verified catalogs for executable plugins, and pin package versions when reproducibility matters.
+Review the publisher, source, repository, requested capabilities, and resulting configuration before installation.
+Prefer trusted catalogs for executable plugins and pin package versions when reproducibility matters.
