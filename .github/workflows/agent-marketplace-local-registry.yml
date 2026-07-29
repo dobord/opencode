@@ -36,6 +36,7 @@ jobs:
             > /tmp/marketplace-local-registry.patch
           git apply --reject --whitespace=nowarn /tmp/marketplace-local-registry.patch || true
           python3 .github/agent-marketplace-local-registry/repair.py
+          python3 .github/agent-marketplace-local-registry/typefix.py
           rm -rf .github/agent-marketplace-local-registry
           rm .github/workflows/agent-marketplace-local-registry.yml
 
