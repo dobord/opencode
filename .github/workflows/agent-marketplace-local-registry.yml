@@ -34,8 +34,7 @@ jobs:
             | base64 --decode \
             | xz --decompress \
             > /tmp/marketplace-local-registry.patch
-          git apply --check /tmp/marketplace-local-registry.patch
-          git apply /tmp/marketplace-local-registry.patch
+          git apply --3way /tmp/marketplace-local-registry.patch
           rm -rf .github/agent-marketplace-local-registry
           rm .github/workflows/agent-marketplace-local-registry.yml
 
