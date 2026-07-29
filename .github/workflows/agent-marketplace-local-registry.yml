@@ -34,7 +34,86 @@ jobs:
             | base64 --decode \
             | xz --decompress \
             > /tmp/marketplace-local-registry.patch
-          git apply --3way /tmp/marketplace-local-registry.patch
+
+          git apply --reject --whitespace=nowarn /tmp/marketplace-local-registry.patch || true
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          allowed = {
+              Path("packages/opencode/src/config/config.ts.rej"),
+              Path("packages/sdk/js/src/v2/gen/types.gen.ts.rej"),
+              Path("packages/tui/src/feature-plugins/system/marketplace.tsx.rej"),
+              Path("packages/web/src/content/docs/ru/marketplace.mdx.rej"),
+          }
+          actual = set(Path(".").glob("**/*.rej"))
+          unexpected = actual - allowed
+          if unexpected:
+              raise SystemExit(f"Unexpected rejected hunks: {sorted(map(str, unexpected))}")
+
+          config = Path("packages/opencode/src/config/config.ts")
+          text = config.read_text()
+          if 'import * as MarketplaceRegistry from "@/marketplace/registry"' not in text:
+              anchor = 'import { withTransientReadRetry } from "@/util/effect-http-client"\n'
+              addition = '''import type { MarketplaceHostConfig } from "@opencode-ai/core/marketplace"\nimport { composeMarketplaceConfig, decomposeMarketplaceConfig } from "@/marketplace/overlay"\nimport * as MarketplaceRegistry from "@/marketplace/registry"\n'''
+              if anchor not in text:
+                  raise SystemExit("Config import anchor was not found")
+              text = text.replace(anchor, anchor + addition, 1)
+              config.write_text(text)
+
+          sdk = Path("packages/sdk/js/src/v2/gen/types.gen.ts")
+          text = sdk.read_text()
+          marker = "  marketplace?: {\n"
+          if marker + "    revision?: number\n" not in text:
+              if marker not in text:
+                  raise SystemExit("SDK marketplace type anchor was not found")
+              text = text.replace(marker, marker + "    revision?: number\n", 1)
+              sdk.write_text(text)
+
+          tui = Path("packages/tui/src/feature-plugins/system/marketplace.tsx")
+          text = tui.read_text()
+          old = "    const result = uninstallMarketplaceItem(config(), props.listing.key)\n"
+          new = "    const cfg = config()\n    if (!cfg) return\n    const result = uninstallMarketplaceItem(cfg, props.listing.key)\n"
+          if old in text:
+              text = text.replace(old, new, 1)
+              tui.write_text(text)
+          if "uninstallMarketplaceItem(config(), props.listing.key)" in text:
+              raise SystemExit("TUI uninstall still uses an unresolved async config")
+
+          docs = Path("packages/web/src/content/docs/ru/marketplace.mdx")
+          text = docs.read_text()
+          paragraph = '''Источники Marketplace, установленные пакеты и состояния компонентов хранятся в локальном реестре приложения
+OpenCode, а не в `opencode.json` или `opencode.jsonc`. Активные install plans проецируются в эффективную конфигурацию
+только в памяти. Поэтому установка, обновление, выключение и удаление пакета не изменяют пользовательский файл
+конфигурации.
+
+Команда `opencode plugin marketplace export --name team` экспортирует установленный набор как переносимый профиль.
+Заголовки запросов источников, installation receipts и другое локальное служебное состояние в экспорт не попадают.
+
+'''
+          if "в локальном реестре приложения" not in text:
+              anchor = '''Установленный пакет может оставаться установленным, когда он выключен. Каждый объявленный скил и MCP-сервер также
+можно включать или выключать независимо.
+
+'''
+              if anchor not in text:
+                  raise SystemExit("Russian documentation anchor was not found")
+              docs.write_text(text.replace(anchor, anchor + paragraph, 1))
+
+          for reject in actual:
+              reject.unlink()
+
+          required = {
+              config: 'MarketplaceRegistry from "@/marketplace/registry"',
+              sdk: "revision?: number",
+              tui: "uninstallMarketplaceItem(cfg, props.listing.key)",
+              docs: "в локальном реестре приложения",
+          }
+          for file, needle in required.items():
+              if needle not in file.read_text():
+                  raise SystemExit(f"Required transformation missing in {file}: {needle}")
+          PY
+
           rm -rf .github/agent-marketplace-local-registry
           rm .github/workflows/agent-marketplace-local-registry.yml
 
