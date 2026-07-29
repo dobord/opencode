@@ -190,6 +190,73 @@ description: Second test skill.
     ),
   )
 
+  it.live("filters skills disabled by an installed marketplace plugin", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Promise.all([
+              Bun.write(
+                path.join(dir, ".opencode", "skill", "marketplace-enabled", "SKILL.md"),
+                `---
+name: marketplace-enabled
+description: Enabled marketplace skill.
+---
+
+# Enabled
+`,
+              ),
+              Bun.write(
+                path.join(dir, ".opencode", "skill", "marketplace-disabled", "SKILL.md"),
+                `---
+name: marketplace-disabled
+description: Disabled marketplace skill.
+---
+
+# Disabled
+`,
+              ),
+              Bun.write(
+                path.join(dir, "opencode.json"),
+                JSON.stringify({
+                  marketplace: {
+                    installed: {
+                      "source:catalog:plugin": {
+                        source: "source",
+                        catalog: "catalog",
+                        item: "plugin",
+                        name: "Plugin",
+                        kind: "plugin",
+                        version: "1.0.0",
+                        fingerprint: "test",
+                        installed_at: "2026-01-01T00:00:00.000Z",
+                        updated_at: "2026-01-01T00:00:00.000Z",
+                        plan: {
+                          skills: {
+                            items: [
+                              { id: "enabled", name: "marketplace-enabled" },
+                              { id: "disabled", name: "marketplace-disabled" },
+                            ],
+                          },
+                        },
+                        receipt: {},
+                        disabled_skills: ["disabled"],
+                      },
+                    },
+                  },
+                }),
+              ),
+            ]),
+          )
+
+          const skill = yield* Skill.Service
+          const list = (yield* skill.all()).filter((item) => item.location !== "<built-in>")
+          expect(list.map((item) => item.name)).toEqual(["marketplace-enabled"])
+        }),
+      { git: true },
+    ),
+  )
+
   it.live("skips skills with missing frontmatter", () =>
     provideTmpdirInstance(
       (dir) =>

@@ -30,7 +30,11 @@ export const Installed = Schema.Struct({
   updated_at: Schema.String,
   snapshot: Schema.optional(Schema.Unknown),
   plan: Schema.Unknown,
+  active_plan: Schema.optional(Schema.Unknown),
   receipt: Schema.Unknown,
+  enabled: Schema.optional(Schema.Boolean),
+  disabled_skills: Schema.optional(Schema.Array(Schema.String)),
+  disabled_mcp: Schema.optional(Schema.Array(Schema.String)),
 })
 
 export const Info = Schema.Struct({

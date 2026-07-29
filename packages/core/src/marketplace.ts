@@ -23,11 +23,26 @@ export type MarketplacePublisher = {
 
 export type MarketplacePluginSpec = string | [string, Record<string, unknown>]
 
+export type MarketplaceIcon = {
+  "src-light": string
+  "src-dark"?: string
+}
+
+export type MarketplaceSkill = {
+  id: string
+  name: string
+  description?: string
+  path?: string
+  url?: string
+  enabled?: boolean
+}
+
 export type MarketplaceInstallPlan = {
   plugins?: MarketplacePluginSpec[]
   skills?: {
     paths?: string[]
     urls?: string[]
+    items?: MarketplaceSkill[]
   }
   agents?: Record<string, Record<string, unknown>>
   commands?: Record<string, Record<string, unknown>>
@@ -47,6 +62,8 @@ export type MarketplaceCatalogItem = {
   license?: string
   tags?: string[]
   featured?: boolean
+  icon?: MarketplaceIcon
+  brand_color?: string
   compatibility?: {
     opencode?: string
     platforms?: string[]
@@ -108,7 +125,11 @@ export type MarketplaceInstalled = {
   updated_at: string
   snapshot?: MarketplaceInstalledSnapshot
   plan: MarketplaceInstallPlan
+  active_plan?: MarketplaceInstallPlan
   receipt: MarketplaceReceipt
+  enabled?: boolean
+  disabled_skills?: string[]
+  disabled_mcp?: string[]
 }
 
 export type MarketplaceState = {
@@ -169,6 +190,22 @@ export type MarketplaceInstallResult =
 export type MarketplaceUninstallResult = {
   config: MarketplaceHostConfig
   preserved: string[]
+}
+
+export type MarketplaceToggleResult =
+  | {
+      ok: true
+      config: MarketplaceHostConfig
+      conflicts: []
+      preserved: string[]
+    }
+  | {
+      ok: false
+      conflicts: MarketplaceConflict[]
+    }
+
+export type MarketplaceSkillComponent = MarketplaceSkill & {
+  source: "item" | "path" | "url"
 }
 
 type MarketplaceInstalledEntry = {
@@ -279,13 +316,7 @@ export async function loadMarketplace(input: {
           const catalog =
             source.url === OFFICIAL_MARKETPLACE_SOURCE.url
               ? OFFICIAL_MARKETPLACE_CATALOG
-              : parseMarketplaceCatalog(
-                  await fetcher(normalizeMarketplaceURL(source.url), {
-                    headers: source.headers,
-                    cache: "no-store",
-                    signal: AbortSignal.timeout(input.timeout ?? 10_000),
-                  }).then(readCatalogResponse),
-                )
+              : await fetchMarketplaceCatalog(fetcher, source, input.timeout ?? 10_000)
           return { ok: true as const, source, catalog }
         } catch (error) {
           return { ok: false as const, source, error: error instanceof Error ? error.message : String(error) }
@@ -353,6 +384,23 @@ export async function loadMarketplace(input: {
   }
 }
 
+async function fetchMarketplaceCatalog(fetcher: MarketplaceFetch, source: MarketplaceSource, timeout: number) {
+  const load = async (url: string) =>
+    resolveCatalogIcons(
+      parseMarketplaceCatalog(
+        await fetcher(url, {
+          headers: source.headers,
+          cache: "no-store",
+          signal: AbortSignal.timeout(timeout),
+        }).then(readCatalogResponse),
+      ),
+      url,
+    )
+  const urls = marketplaceCatalogURLs(source.url)
+  if (urls.length === 1) return load(urls[0]!)
+  return Promise.any(urls.map(load))
+}
+
 export function parseMarketplaceCatalog(value: unknown): MarketplaceCatalog {
   const catalog = record(value, "catalog")
   if (catalog.schema !== "opencode.marketplace/v1") {
@@ -404,10 +452,27 @@ export function installMarketplaceItem(
 ): MarketplaceInstallResult {
   const current = config.marketplace?.installed?.[listing.key]
   const base = current ? uninstallMarketplaceItem(config, listing.key).config : clone(config)
-  const conflicts = marketplaceConflicts(base, listing.item.install)
-  if (conflicts.length > 0 && options?.force !== true) return { ok: false, conflicts }
-
-  const receipt = applyPlan(base, listing.item.install)
+  const disabledSkills = current?.disabled_skills?.filter((id) =>
+    marketplaceSkillComponents(listing.item.install).some((component) => component.id === id),
+  )
+  const disabledMcp =
+    current?.disabled_mcp?.filter((id) => id in (listing.item.install.mcp ?? {})) ??
+    initialDisabledMcp(listing.item.install)
+  const enabled = current?.enabled !== false
+  const state = {
+    ...current,
+    enabled,
+    disabled_skills:
+      disabledSkills ??
+      marketplaceSkillComponents(listing.item.install)
+        .filter((component) => component.enabled === false)
+        .map((component) => component.id),
+    disabled_mcp: disabledMcp,
+  }
+  const activePlan = marketplaceActivePlan(listing.item.install, state)
+  const activeConflicts = marketplaceConflicts(base, activePlan)
+  if (activeConflicts.length > 0 && options?.force !== true) return { ok: false, conflicts: activeConflicts }
+  const receipt = applyPlan(base, activePlan)
   const now = new Date().toISOString()
   base.marketplace = {
     ...base.marketplace,
@@ -429,7 +494,11 @@ export function installMarketplaceItem(
         updated_at: now,
         snapshot: marketplaceSnapshot(listing.item),
         plan: clone(listing.item.install),
+        active_plan: activePlan,
         receipt,
+        enabled,
+        ...(state.disabled_skills.length ? { disabled_skills: state.disabled_skills } : {}),
+        ...(state.disabled_mcp.length ? { disabled_mcp: state.disabled_mcp } : {}),
       },
     },
   }
@@ -442,17 +511,252 @@ export function uninstallMarketplaceItem(config: MarketplaceHostConfig, key: str
   const next = clone(config)
   const preserved: string[] = []
   const successors = installedAfter(next, key)
-  restorePlugins(next, installed, successors, preserved)
-  restoreArray(next, "skills.paths", installed.plan.skills?.paths, installed.receipt.skills?.paths, successors, preserved)
-  restoreArray(next, "skills.urls", installed.plan.skills?.urls, installed.receipt.skills?.urls, successors, preserved)
-  restoreObject(next, "agent", installed.plan.agents, installed.receipt.agents, successors, preserved)
-  restoreObject(next, "command", installed.plan.commands, installed.receipt.commands, successors, preserved)
-  restoreObject(next, "mcp", installed.plan.mcp, installed.receipt.mcp, successors, preserved)
-  restoreArray(next, "instructions", installed.plan.instructions, installed.receipt.instructions, successors, preserved)
+  const plan = installedActivePlan(installed)
+  restorePlugins(next, installed, plan, successors, preserved)
+  restoreArray(next, "skills.paths", skillPaths(plan), installed.receipt.skills?.paths, successors, preserved)
+  restoreArray(next, "skills.urls", skillURLs(plan), installed.receipt.skills?.urls, successors, preserved)
+  restoreObject(next, "agent", plan.agents, installed.receipt.agents, successors, preserved)
+  restoreObject(next, "command", plan.commands, installed.receipt.commands, successors, preserved)
+  restoreObject(next, "mcp", plan.mcp, installed.receipt.mcp, successors, preserved)
+  restoreArray(next, "instructions", plan.instructions, installed.receipt.instructions, successors, preserved)
   const entries = { ...next.marketplace?.installed }
   delete entries[key]
   next.marketplace = { ...next.marketplace, installed: entries }
   return { config: next, preserved }
+}
+
+export function marketplaceItemEnabled(config: MarketplaceHostConfig, key: string) {
+  return config.marketplace?.installed?.[key]?.enabled !== false
+}
+
+export function marketplaceSkillEnabled(config: MarketplaceHostConfig, key: string, id: string) {
+  const installed = config.marketplace?.installed?.[key]
+  if (!installed) return false
+  return !installed.disabled_skills?.includes(id)
+}
+
+export function marketplaceMcpEnabled(config: MarketplaceHostConfig, key: string, id: string) {
+  const installed = config.marketplace?.installed?.[key]
+  if (!installed) return false
+  return !installed.disabled_mcp?.includes(id)
+}
+
+export function marketplaceEnabledMcpNames(config: MarketplaceHostConfig, key: string) {
+  const installed = config.marketplace?.installed?.[key]
+  if (!installed || installed.enabled === false) return []
+  const disabled = new Set(installed.disabled_mcp ?? [])
+  return Object.keys(installed.plan.mcp ?? {}).filter((name) => !disabled.has(name))
+}
+
+export function setMarketplaceItemEnabled(
+  config: MarketplaceHostConfig,
+  key: string,
+  enabled: boolean,
+): MarketplaceToggleResult {
+  return reconfigureMarketplaceItem(config, key, { enabled })
+}
+
+export function setMarketplaceSkillEnabled(
+  config: MarketplaceHostConfig,
+  key: string,
+  id: string,
+  enabled: boolean,
+): MarketplaceToggleResult {
+  const installed = config.marketplace?.installed?.[key]
+  if (!installed || !marketplaceSkillComponents(installed.plan).some((component) => component.id === id)) {
+    return { ok: true, config: clone(config), conflicts: [], preserved: [] }
+  }
+  return reconfigureMarketplaceItem(config, key, {
+    disabled_skills: enabled
+      ? (installed.disabled_skills ?? []).filter((candidate) => candidate !== id)
+      : Array.from(new Set([...(installed.disabled_skills ?? []), id])),
+  })
+}
+
+export function setMarketplaceMcpEnabled(
+  config: MarketplaceHostConfig,
+  key: string,
+  id: string,
+  enabled: boolean,
+): MarketplaceToggleResult {
+  const installed = config.marketplace?.installed?.[key]
+  if (!installed || !(id in (installed.plan.mcp ?? {}))) {
+    return { ok: true, config: clone(config), conflicts: [], preserved: [] }
+  }
+  return reconfigureMarketplaceItem(config, key, {
+    disabled_mcp: enabled
+      ? (installed.disabled_mcp ?? []).filter((candidate) => candidate !== id)
+      : Array.from(new Set([...(installed.disabled_mcp ?? []), id])),
+  })
+}
+
+export function marketplaceSkillComponents(plan: MarketplaceInstallPlan): MarketplaceSkillComponent[] {
+  const items = (plan.skills?.items ?? []).map((item) => ({ ...item, source: "item" as const }))
+  const itemPaths = new Set(items.flatMap((item) => (item.path ? [item.path] : [])))
+  const itemURLs = new Set(items.flatMap((item) => (item.url ? [item.url] : [])))
+  return [
+    ...items,
+    ...(plan.skills?.paths ?? [])
+      .filter((value) => !itemPaths.has(value))
+      .map((value) => ({
+        id: `path:${value}`,
+        name: skillSourceName(value),
+        path: value,
+        source: "path" as const,
+      })),
+    ...(plan.skills?.urls ?? [])
+      .filter((value) => !itemURLs.has(value))
+      .map((value) => ({
+        id: `url:${value}`,
+        name: skillSourceName(value),
+        url: value,
+        source: "url" as const,
+      })),
+  ]
+}
+
+export function marketplaceDisabledSkillNames(config: MarketplaceHostConfig) {
+  return Object.values(config.marketplace?.installed ?? {}).flatMap((installed) => {
+    if (installed.enabled === false)
+      return marketplaceSkillComponents(installed.plan).map((component) => component.name)
+    const disabled = new Set(installed.disabled_skills ?? [])
+    return marketplaceSkillComponents(installed.plan)
+      .filter((component) => disabled.has(component.id))
+      .map((component) => component.name)
+  })
+}
+
+function reconfigureMarketplaceItem(
+  config: MarketplaceHostConfig,
+  key: string,
+  patch: Partial<Pick<MarketplaceInstalled, "enabled" | "disabled_skills" | "disabled_mcp">>,
+): MarketplaceToggleResult {
+  const installed = config.marketplace?.installed?.[key]
+  if (!installed) return { ok: true, config: clone(config), conflicts: [], preserved: [] }
+  const state = { ...installed, ...patch }
+  const removed = uninstallMarketplaceItem(config, key)
+  const activePlan = marketplaceActivePlan(installed.plan, state)
+  const conflicts = marketplaceConflicts(removed.config, activePlan)
+  if (conflicts.length) return { ok: false, conflicts }
+
+  const receipt = applyPlan(removed.config, activePlan)
+  const next = {
+    ...state,
+    active_plan: activePlan,
+    receipt,
+    updated_at: new Date().toISOString(),
+    ...(state.disabled_skills?.length ? {} : { disabled_skills: undefined }),
+    ...(state.disabled_mcp?.length ? {} : { disabled_mcp: undefined }),
+  }
+  const entries = removed.config.marketplace?.installed ?? {}
+  const order = Object.keys(config.marketplace?.installed ?? {})
+  removed.config.marketplace = {
+    ...removed.config.marketplace,
+    installed: Object.fromEntries(
+      order.flatMap((candidate) => {
+        if (candidate === key) return [[key, next]]
+        const value = entries[candidate]
+        return value ? [[candidate, value]] : []
+      }),
+    ),
+  }
+  return { ok: true, config: removed.config, conflicts: [], preserved: removed.preserved }
+}
+
+function marketplaceActivePlan(
+  plan: MarketplaceInstallPlan,
+  state: Pick<MarketplaceInstalled, "enabled" | "disabled_skills" | "disabled_mcp">,
+): MarketplaceInstallPlan {
+  if (state.enabled === false) return {}
+  const disabledSkills = new Set(state.disabled_skills ?? [])
+  const items = (plan.skills?.items ?? []).filter((item) => !disabledSkills.has(item.id))
+  const itemPaths = new Set((plan.skills?.items ?? []).flatMap((item) => (item.path ? [item.path] : [])))
+  const itemURLs = new Set((plan.skills?.items ?? []).flatMap((item) => (item.url ? [item.url] : [])))
+  const paths = Array.from(
+    new Set([
+      ...(plan.skills?.paths ?? []).filter((value) => !itemPaths.has(value) && !disabledSkills.has(`path:${value}`)),
+      ...items.flatMap((item) => (item.path ? [item.path] : [])),
+    ]),
+  )
+  const urls = Array.from(
+    new Set([
+      ...(plan.skills?.urls ?? []).filter((value) => !itemURLs.has(value) && !disabledSkills.has(`url:${value}`)),
+      ...items.flatMap((item) => (item.url ? [item.url] : [])),
+    ]),
+  )
+  const disabledMcp = new Set(state.disabled_mcp ?? [])
+  return {
+    ...clone(plan),
+    ...(plan.skills
+      ? {
+          skills: {
+            ...(paths.length ? { paths } : {}),
+            ...(urls.length ? { urls } : {}),
+            ...(items.length ? { items } : {}),
+          },
+        }
+      : {}),
+    ...(plan.mcp
+      ? {
+          mcp: Object.fromEntries(
+            Object.entries(plan.mcp).map(([id, value]) => {
+              if (disabledMcp.has(id))
+                return [id, { ...value, enabled: false, ...(value.disabled === true ? { disabled: true } : {}) }]
+              if (value.enabled === false || value.disabled === true) {
+                return [id, { ...value, enabled: true, ...(value.disabled === true ? { disabled: false } : {}) }]
+              }
+              return [id, clone(value)]
+            }),
+          ),
+        }
+      : {}),
+  }
+}
+
+function installedActivePlan(installed: MarketplaceInstalled) {
+  if (installed.active_plan) return installed.active_plan
+  if (installed.enabled === false) return {}
+  return installed.plan
+}
+
+function initialDisabledMcp(plan: MarketplaceInstallPlan) {
+  return Object.entries(plan.mcp ?? {})
+    .filter(([, value]) => value.enabled === false || value.disabled === true)
+    .map(([id]) => id)
+}
+
+function skillPaths(plan: MarketplaceInstallPlan) {
+  return Array.from(
+    new Set([
+      ...(plan.skills?.paths ?? []),
+      ...(plan.skills?.items ?? []).flatMap((item) => (item.path ? [item.path] : [])),
+    ]),
+  )
+}
+
+function skillURLs(plan: MarketplaceInstallPlan) {
+  return Array.from(
+    new Set([
+      ...(plan.skills?.urls ?? []),
+      ...(plan.skills?.items ?? []).flatMap((item) => (item.url ? [item.url] : [])),
+    ]),
+  )
+}
+
+function skillSourceName(value: string) {
+  const raw = (() => {
+    try {
+      return new URL(value).pathname
+    } catch {
+      return value
+    }
+  })()
+  return decodeURIComponent(
+    raw
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || value,
+  ).replace(/\.(git|md)$/i, "")
 }
 
 export function marketplaceConflicts(config: MarketplaceHostConfig, plan: MarketplaceInstallPlan) {
@@ -472,7 +776,7 @@ export function marketplaceConflicts(config: MarketplaceHostConfig, plan: Market
 export function marketplacePermissions(item: MarketplaceCatalogItem) {
   const permissions = new Set(item.permissions ?? [])
   if (item.install.plugins?.length) permissions.add("Runs third-party plugin code inside OpenCode")
-  if (item.install.skills?.paths?.length || item.install.skills?.urls?.length) {
+  if (marketplaceSkillComponents(item.install).length) {
     permissions.add("Adds instructions that agents can load on demand")
   }
   if (Object.keys(item.install.agents ?? {}).length) permissions.add("Adds or replaces agent configuration")
@@ -483,12 +787,11 @@ export function marketplacePermissions(item: MarketplaceCatalogItem) {
 }
 
 export function marketplacePlanSummary(plan: MarketplaceInstallPlan) {
+  const skillCount = marketplaceSkillComponents(plan).length
   return (
     [
       plan.plugins?.length ? `${plan.plugins.length} plugin${plan.plugins.length === 1 ? "" : "s"}` : undefined,
-      (plan.skills?.paths?.length ?? 0) + (plan.skills?.urls?.length ?? 0)
-        ? `${(plan.skills?.paths?.length ?? 0) + (plan.skills?.urls?.length ?? 0)} skill source${(plan.skills?.paths?.length ?? 0) + (plan.skills?.urls?.length ?? 0) === 1 ? "" : "s"}`
-        : undefined,
+      skillCount ? `${skillCount} skill${skillCount === 1 ? "" : "s"}` : undefined,
       Object.keys(plan.agents ?? {}).length
         ? `${Object.keys(plan.agents ?? {}).length} agent${Object.keys(plan.agents ?? {}).length === 1 ? "" : "s"}`
         : undefined,
@@ -534,9 +837,26 @@ export function normalizeMarketplaceURL(value: string) {
     if (action === "blob" && branch && parts.length) {
       return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${parts.join("/")}`
     }
-    if (!action) return `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/.opencode/marketplace.json`
+    if (!action)
+      return `https://raw.githubusercontent.com/${owner}/${repo.replace(/\.git$/, "")}/HEAD/.opencode/marketplace.json`
   }
   return parsed.href
+}
+
+function marketplaceCatalogURLs(value: string) {
+  const source = normalizeMarketplaceURL(value)
+  if (!source.endsWith(".git")) return [source]
+  const url = new URL(source)
+  const repository = `${url.origin}${url.pathname.slice(0, -".git".length)}`
+  if (url.hostname === "github.com") {
+    const [owner, name] = url.pathname.split("/").filter(Boolean)
+    return [`https://raw.githubusercontent.com/${owner}/${name?.replace(/\.git$/, "")}/HEAD/.opencode/marketplace.json`]
+  }
+  return [
+    `${repository}/-/raw/HEAD/.opencode/marketplace.json`,
+    `${repository}/raw/HEAD/.opencode/marketplace.json`,
+    `${repository}/raw/branch/main/.opencode/marketplace.json`,
+  ]
 }
 
 function parseItem(value: unknown, index: number): MarketplaceCatalogItem {
@@ -546,6 +866,8 @@ function parseItem(value: unknown, index: number): MarketplaceCatalogItem {
   if (!KINDS.has(kind as MarketplaceKind)) throw new Error(`Unsupported marketplace kind: ${kind}`)
   const homepage = optionalWebURL(item.homepage, `${label}.homepage`)
   const repository = optionalWebURL(item.repository, `${label}.repository`)
+  const icon = item.icon === undefined ? undefined : parseIcon(item.icon, `${label}.icon`)
+  const brandColor = item.brand_color === undefined ? undefined : color(item.brand_color, `${label}.brand_color`)
   return {
     id: identifier(item.id, `${label}.id`),
     name: text(item.name, `${label}.name`),
@@ -558,6 +880,8 @@ function parseItem(value: unknown, index: number): MarketplaceCatalogItem {
     ...(optionalText(item.license, `${label}.license`) ? { license: item.license as string } : {}),
     ...(item.tags === undefined ? {} : { tags: strings(item.tags, `${label}.tags`) }),
     ...(typeof item.featured === "boolean" ? { featured: item.featured } : {}),
+    ...(icon ? { icon } : {}),
+    ...(brandColor ? { brand_color: brandColor } : {}),
     ...(item.compatibility === undefined
       ? {}
       : { compatibility: parseCompatibility(item.compatibility, `${label}.compatibility`) }),
@@ -613,16 +937,46 @@ function parsePlan(value: unknown, label: string): MarketplaceInstallPlan {
 
 function parseSkills(value: unknown, label: string) {
   const skills = record(value, label)
+  const items =
+    skills.items === undefined
+      ? undefined
+      : array(skills.items, `${label}.items`).map((value, index) => {
+          const item = record(value, `${label}.items[${index}]`)
+          return {
+            id: identifier(item.id, `${label}.items[${index}].id`),
+            name: text(item.name, `${label}.items[${index}].name`),
+            ...(optionalText(item.description, `${label}.items[${index}].description`)
+              ? { description: item.description as string }
+              : {}),
+            ...(optionalText(item.path, `${label}.items[${index}].path`) ? { path: item.path as string } : {}),
+            ...(optionalText(item.url, `${label}.items[${index}].url`) ? { url: item.url as string } : {}),
+            ...(typeof item.enabled === "boolean" ? { enabled: item.enabled } : {}),
+          }
+        })
+  if (items) {
+    const ids = new Set<string>()
+    for (const item of items) {
+      if (ids.has(item.id)) throw new Error(`${label}.items contains duplicate skill id: ${item.id}`)
+      ids.add(item.id)
+    }
+  }
   return {
     ...(skills.paths === undefined ? {} : { paths: strings(skills.paths, `${label}.paths`) }),
     ...(skills.urls === undefined ? {} : { urls: strings(skills.urls, `${label}.urls`) }),
+    ...(items ? { items } : {}),
   }
 }
 
 function plugins(value: unknown, label: string): MarketplacePluginSpec[] {
   return array(value, label).map((item, index) => {
     if (typeof item === "string" && item.trim()) return item.trim()
-    if (Array.isArray(item) && item.length === 2 && typeof item[0] === "string" && item[0].trim() && isRecord(item[1])) {
+    if (
+      Array.isArray(item) &&
+      item.length === 2 &&
+      typeof item[0] === "string" &&
+      item[0].trim() &&
+      isRecord(item[1])
+    ) {
       return [item[0].trim(), item[1]]
     }
     throw new Error(`${label}[${index}] must be a plugin package string or [package, options] tuple`)
@@ -657,13 +1011,13 @@ function applyPlan(config: MarketplaceHostConfig, plan: MarketplaceInstallPlan):
       return { identity, previous: clone(previous) }
     })
   }
-  if (plan.skills?.paths?.length || plan.skills?.urls?.length) {
+  if (skillPaths(plan).length || skillURLs(plan).length) {
     receipt.skills = {}
-    if (plan.skills.paths?.length) {
-      receipt.skills.paths = addArray(config, "skills.paths", plan.skills.paths)
+    if (skillPaths(plan).length) {
+      receipt.skills.paths = addArray(config, "skills.paths", skillPaths(plan))
     }
-    if (plan.skills.urls?.length) {
-      receipt.skills.urls = addArray(config, "skills.urls", plan.skills.urls)
+    if (skillURLs(plan).length) {
+      receipt.skills.urls = addArray(config, "skills.urls", skillURLs(plan))
     }
   }
   if (Object.keys(plan.agents ?? {}).length) receipt.agents = applyObject(config, "agent", plan.agents ?? {})
@@ -703,10 +1057,11 @@ function applyObject(
 function restorePlugins(
   config: MarketplaceHostConfig,
   installed: MarketplaceInstalled,
+  plan: MarketplaceInstallPlan,
   successors: MarketplaceInstalledEntry[],
   preserved: string[],
 ) {
-  for (const plugin of installed.plan.plugins ?? []) {
+  for (const plugin of plan.plugins ?? []) {
     const identity = pluginIdentity(plugin)
     const receipt = installed.receipt.plugins?.find((item) => item.identity === identity)
     if (claimPlugin(successors, identity, plugin, receipt?.previous)) continue
@@ -719,7 +1074,10 @@ function restorePlugins(
       preserved.push(`plugin.${identity}`)
       continue
     }
-    config.plugin = [...(config.plugin ?? []).filter((item) => pluginIdentity(item) !== identity), ...clone(receipt.previous)]
+    config.plugin = [
+      ...(config.plugin ?? []).filter((item) => pluginIdentity(item) !== identity),
+      ...clone(receipt.previous),
+    ]
   }
 }
 
@@ -792,7 +1150,9 @@ function claimPlugin(
 ) {
   let claimed = false
   for (const entry of successors) {
-    const candidate = (entry.installed.plan.plugins ?? []).find((item) => pluginIdentity(item) === identity)
+    const candidate = (installedActivePlan(entry.installed).plugins ?? []).find(
+      (item) => pluginIdentity(item) === identity,
+    )
     if (!candidate) continue
     claimed = true
     const receipt = entry.installed.receipt.plugins?.find((item) => item.identity === identity)
@@ -812,7 +1172,7 @@ function claimObject(
 ) {
   let claimed = false
   for (const entry of successors) {
-    const plan = installedObject(entry.installed.plan, root)
+    const plan = installedObject(installedActivePlan(entry.installed), root)
     if (!plan || !(key in plan)) continue
     claimed = true
     const receipt = installedObjectReceipt(entry.installed.receipt, root)
@@ -823,7 +1183,6 @@ function claimObject(
   }
   return claimed
 }
-
 
 function installedObject(plan: MarketplaceInstallPlan, root: "agent" | "command" | "mcp") {
   if (root === "agent") return plan.agents
@@ -845,7 +1204,7 @@ function claimArray(
 ) {
   let claimed = false
   for (const entry of successors) {
-    if (!installedArray(entry.installed.plan, path).includes(value)) continue
+    if (!installedArray(installedActivePlan(entry.installed), path).includes(value)) continue
     claimed = true
     const receipt = installedArrayReceipt(entry.installed.receipt, path)
     if (receipt?.[value] !== true || existed === undefined) continue
@@ -857,13 +1216,10 @@ function claimArray(
 
 function installedArray(plan: MarketplaceInstallPlan, path: "skills.paths" | "skills.urls" | "instructions") {
   if (path === "instructions") return plan.instructions ?? []
-  return plan.skills?.[path === "skills.paths" ? "paths" : "urls"] ?? []
+  return path === "skills.paths" ? skillPaths(plan) : skillURLs(plan)
 }
 
-function installedArrayReceipt(
-  receipt: MarketplaceReceipt,
-  path: "skills.paths" | "skills.urls" | "instructions",
-) {
+function installedArrayReceipt(receipt: MarketplaceReceipt, path: "skills.paths" | "skills.urls" | "instructions") {
   if (path === "instructions") return receipt.instructions
   return receipt.skills?.[path === "skills.paths" ? "paths" : "urls"]
 }
@@ -946,6 +1302,54 @@ function optionalWebURL(value: unknown, label: string) {
   return parsed.href
 }
 
+function parseIcon(value: unknown, label: string): MarketplaceIcon {
+  if (typeof value === "string") return { "src-light": iconAsset(value, label) }
+  const icon = record(value, label)
+  return {
+    "src-light": iconAsset(icon["src-light"], `${label}.src-light`),
+    ...(icon["src-dark"] === undefined ? {} : { "src-dark": iconAsset(icon["src-dark"], `${label}.src-dark`) }),
+  }
+}
+
+function iconAsset(value: unknown, label: string) {
+  const raw = text(value, label)
+  if (/^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(raw)) return raw
+  if (raw.startsWith("./")) {
+    if (raw.includes("\\") || raw.split("/").includes("..")) {
+      throw new Error(`${label} must stay inside the catalog directory`)
+    }
+    return raw
+  }
+  return optionalWebURL(raw, label)!
+}
+
+function resolveCatalogIcons(catalog: MarketplaceCatalog, source: string): MarketplaceCatalog {
+  return {
+    ...catalog,
+    items: catalog.items.map((item) => {
+      if (!item.icon) return item
+      return {
+        ...item,
+        icon: {
+          "src-light": resolveIconAsset(item.icon["src-light"], source),
+          ...(item.icon["src-dark"] ? { "src-dark": resolveIconAsset(item.icon["src-dark"], source) } : {}),
+        },
+      }
+    }),
+  }
+}
+
+function resolveIconAsset(value: string, source: string) {
+  if (!value.startsWith("./")) return value
+  return new URL(value, normalizeMarketplaceURL(source)).href
+}
+
+function color(value: unknown, label: string) {
+  const result = text(value, label)
+  if (!/^#[0-9a-f]{6}$/i.test(result)) throw new Error(`${label} must be a six-digit hex color`)
+  return result.toUpperCase()
+}
+
 function marketplaceSnapshot(item: MarketplaceCatalogItem): MarketplaceInstalledSnapshot {
   const { install: _, ...snapshot } = item
   return clone(snapshot)
@@ -962,7 +1366,9 @@ function isLoopback(hostname: string) {
 function identifier(value: unknown, label: string) {
   const result = text(value, label)
   if (result.length > MAX_IDENTIFIER_LENGTH || result.includes(":") || /[\u0000-\u001f\u007f]/.test(result)) {
-    throw new Error(`${label} must be at most ${MAX_IDENTIFIER_LENGTH} characters and cannot contain colons or control characters`)
+    throw new Error(
+      `${label} must be at most ${MAX_IDENTIFIER_LENGTH} characters and cannot contain colons or control characters`,
+    )
   }
   return result
 }

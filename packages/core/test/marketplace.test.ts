@@ -4,11 +4,20 @@ import {
   createMarketplaceSource,
   installMarketplaceItem,
   loadMarketplace,
+  marketplaceDisabledSkillNames,
+  marketplaceEnabledMcpNames,
+  marketplaceItemEnabled,
+  marketplaceMcpEnabled,
   marketplacePermissions,
+  marketplaceSkillComponents,
+  marketplaceSkillEnabled,
   marketplaceSources,
   marketplaceStatus,
   parseMarketplaceCatalog,
   removeMarketplaceSource,
+  setMarketplaceItemEnabled,
+  setMarketplaceMcpEnabled,
+  setMarketplaceSkillEnabled,
   toggleMarketplaceSource,
   uninstallMarketplaceItem,
   upsertMarketplaceSource,
@@ -56,7 +65,6 @@ function keyedListing(id: string, version = "1.0.0") {
   result.item.name = `Review kit ${id}`
   return result
 }
-
 
 describe("marketplace catalogs", () => {
   test("loads enabled catalogs and reports source failures", async () => {
@@ -146,6 +154,127 @@ describe("marketplace catalogs", () => {
         ],
       }),
     ).toThrow("duplicate package identity")
+  })
+
+  test("loads light and dark plugin icons relative to the catalog", async () => {
+    const source = createMarketplaceSource({ url: "https://example.test/catalog/marketplace.json" })
+    const result = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async () =>
+        Response.json({
+          schema: "opencode.marketplace/v1",
+          id: "visual",
+          name: "Visual",
+          items: [
+            {
+              id: "plugin",
+              name: "Visual plugin",
+              description: "Has themed marketplace artwork.",
+              kind: "plugin",
+              version: "1.0.0",
+              icon: { "src-light": "./assets/icon-light.png", "src-dark": "./assets/icon-dark.png" },
+              brand_color: "#10a37f",
+              install: { plugins: ["visual-plugin"] },
+            },
+          ],
+        }),
+    })
+
+    expect(result.listings[0]?.item.icon).toEqual({
+      "src-light": "https://example.test/catalog/assets/icon-light.png",
+      "src-dark": "https://example.test/catalog/assets/icon-dark.png",
+    })
+    expect(result.listings[0]?.item.brand_color).toBe("#10A37F")
+    expect(
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "single-icon",
+        name: "Single icon",
+        items: [
+          {
+            id: "plugin",
+            name: "Plugin",
+            description: "Uses one arbitrary image.",
+            kind: "plugin",
+            version: "1.0.0",
+            icon: "https://example.test/custom-artwork.webp",
+            install: {},
+          },
+        ],
+      }).items[0]?.icon,
+    ).toEqual({ "src-light": "https://example.test/custom-artwork.webp" })
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "old-icon-fields",
+        name: "Old icon fields",
+        items: [
+          {
+            id: "plugin",
+            name: "Plugin",
+            description: "Uses an unsupported icon field.",
+            kind: "plugin",
+            version: "1.0.0",
+            icon: { src: "https://example.test/icon.png" },
+            install: {},
+          },
+        ],
+      }),
+    ).toThrow("catalog.items[0].icon.src-light")
+    expect(() =>
+      parseMarketplaceCatalog({
+        schema: "opencode.marketplace/v1",
+        id: "visual",
+        name: "Visual",
+        items: [
+          {
+            id: "unsafe",
+            name: "Unsafe",
+            description: "Unsafe icon",
+            kind: "plugin",
+            version: "1.0.0",
+            icon: "../secret.png",
+            install: {},
+          },
+        ],
+      }),
+    ).toThrow("absolute HTTP or HTTPS")
+  })
+
+  test("discovers a catalog from a Git repository URL", async () => {
+    const source = createMarketplaceSource({ url: "https://git.example.test/ai/agent-marketplace.git" })
+    const requests: string[] = []
+    const result = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async (input) => {
+        requests.push(String(input))
+        if (String(input).includes("/-/raw/HEAD/")) {
+          return Response.json({
+            schema: "opencode.marketplace/v1",
+            id: "agents",
+            name: "Agents",
+            items: [
+              {
+                id: "review",
+                name: "Review",
+                description: "Review agent",
+                kind: "plugin",
+                version: "1.0.0",
+                icon: "./assets/review.png",
+                install: {},
+              },
+            ],
+          })
+        }
+        return new Response("not found", { status: 404 })
+      },
+    })
+
+    expect(requests).toContain("https://git.example.test/ai/agent-marketplace/-/raw/HEAD/.opencode/marketplace.json")
+    expect(result.errors).toEqual([])
+    expect(result.listings[0]?.item.icon?.["src-light"]).toBe(
+      "https://git.example.test/ai/agent-marketplace/-/raw/HEAD/.opencode/assets/review.png",
+    )
   })
 
   test("rejects oversized catalog responses before parsing", async () => {
@@ -254,11 +383,7 @@ describe("marketplace installation", () => {
     }
     const registry = listing()
     registry.item.install = {
-      plugins: [
-        "example-plugin@2.0.0",
-        "@example/scoped-plugin@2.0.0",
-        "alias-plugin@npm:example-plugin@2.0.0",
-      ],
+      plugins: ["example-plugin@2.0.0", "@example/scoped-plugin@2.0.0", "alias-plugin@npm:example-plugin@2.0.0"],
     }
     const conflict = installMarketplaceItem(config, registry)
     expect(conflict.ok).toBe(false)
@@ -380,6 +505,89 @@ describe("marketplace installation", () => {
     expect(removed.config.marketplace?.installed?.[listing().key]).toBeUndefined()
     expect(removed.config.plugin).toEqual([])
   })
+
+  test("toggles a plugin, each skill, and each MCP while remembering explicit MCP choices", () => {
+    const item = listing()
+    item.item.install.skills = {
+      items: [
+        { id: "review", name: "review", path: ".opencode/skills/review" },
+        { id: "release", name: "release", path: ".opencode/skills/release" },
+      ],
+    }
+    item.item.install.mcp = {
+      docs: { type: "remote", url: "https://example.test/docs" },
+      issues: { type: "remote", url: "https://example.test/issues", enabled: false },
+    }
+    const installed = installMarketplaceItem({}, item, { force: true })
+    if (!installed.ok) throw new Error("Expected install")
+
+    expect(marketplaceItemEnabled(installed.config, item.key)).toBe(true)
+    expect(marketplaceSkillComponents(item.item.install).map((skill) => skill.id)).toEqual(["review", "release"])
+    expect(marketplaceMcpEnabled(installed.config, item.key, "docs")).toBe(true)
+    expect(marketplaceMcpEnabled(installed.config, item.key, "issues")).toBe(false)
+    expect(marketplaceEnabledMcpNames(installed.config, item.key)).toEqual(["docs"])
+    expect(installed.config.mcp?.issues).toMatchObject({ enabled: false })
+
+    const skill = setMarketplaceSkillEnabled(installed.config, item.key, "release", false)
+    if (!skill.ok) throw new Error("Expected skill toggle")
+    expect(marketplaceSkillEnabled(skill.config, item.key, "release")).toBe(false)
+    expect(skill.config.skills?.paths).toEqual([".opencode/skills/review"])
+    expect(marketplaceDisabledSkillNames(skill.config)).toEqual(["release"])
+
+    const mcp = setMarketplaceMcpEnabled(skill.config, item.key, "docs", false)
+    if (!mcp.ok) throw new Error("Expected MCP toggle")
+    expect(mcp.config.mcp?.docs).toMatchObject({ enabled: false })
+
+    const disabled = setMarketplaceItemEnabled(mcp.config, item.key, false)
+    if (!disabled.ok) throw new Error("Expected plugin toggle")
+    expect(marketplaceSkillEnabled(disabled.config, item.key, "review")).toBe(true)
+    expect(marketplaceSkillEnabled(disabled.config, item.key, "release")).toBe(false)
+    expect(marketplaceMcpEnabled(disabled.config, item.key, "docs")).toBe(false)
+    expect(marketplaceMcpEnabled(disabled.config, item.key, "issues")).toBe(false)
+    expect(marketplaceEnabledMcpNames(disabled.config, item.key)).toEqual([])
+    expect(disabled.config.plugin).toEqual([])
+    expect(disabled.config.skills?.paths).toEqual([])
+    expect(disabled.config.mcp).toEqual({})
+
+    const enabled = setMarketplaceItemEnabled(disabled.config, item.key, true)
+    if (!enabled.ok) throw new Error("Expected plugin toggle")
+    expect(enabled.config.plugin).toEqual([["example-plugin@2.0.0", { strict: true }]])
+    expect(enabled.config.skills?.paths).toEqual([".opencode/skills/review"])
+    expect(enabled.config.mcp?.docs).toMatchObject({ enabled: false })
+    expect(enabled.config.mcp?.issues).toMatchObject({ enabled: false })
+    expect(marketplaceEnabledMcpNames(enabled.config, item.key)).toEqual([])
+
+    const docs = setMarketplaceMcpEnabled(enabled.config, item.key, "docs", true)
+    if (!docs.ok) throw new Error("Expected MCP toggle")
+    expect(marketplaceMcpEnabled(docs.config, item.key, "docs")).toBe(true)
+    expect(marketplaceEnabledMcpNames(docs.config, item.key)).toEqual(["docs"])
+    expect(docs.config.mcp?.docs).not.toHaveProperty("enabled", false)
+    expect(docs.config.mcp?.issues).toMatchObject({ enabled: false })
+  })
+
+  test("preserves component choices across marketplace updates", () => {
+    const first = listing("1.0.0")
+    first.item.install.skills = { items: [{ id: "review", name: "review", path: "skills/review" }] }
+    const installed = installMarketplaceItem({}, first, { force: true })
+    if (!installed.ok) throw new Error("Expected install")
+    const skill = setMarketplaceSkillEnabled(installed.config, first.key, "review", false)
+    if (!skill.ok) throw new Error("Expected skill toggle")
+    const mcp = setMarketplaceMcpEnabled(skill.config, first.key, "docs", false)
+    if (!mcp.ok) throw new Error("Expected MCP toggle")
+
+    const next = listing("1.1.0")
+    next.item.install.skills = {
+      items: [
+        { id: "review", name: "review", path: "skills/review" },
+        { id: "release", name: "release", path: "skills/release" },
+      ],
+    }
+    const updated = installMarketplaceItem(mcp.config, next, { force: true })
+    if (!updated.ok) throw new Error("Expected update")
+    expect(marketplaceSkillEnabled(updated.config, next.key, "review")).toBe(false)
+    expect(marketplaceSkillEnabled(updated.config, next.key, "release")).toBe(true)
+    expect(marketplaceMcpEnabled(updated.config, next.key, "docs")).toBe(false)
+  })
 })
 
 describe("marketplace sources", () => {
@@ -409,12 +617,15 @@ describe("marketplace sources", () => {
   })
 
   test("does not let configured catalogs spoof official or verified provenance", () => {
-    const spoofed = upsertMarketplaceSource({}, {
-      id: OFFICIAL_MARKETPLACE_SOURCE.id,
-      name: "Not OpenCode",
-      url: "https://evil.example/catalog.json",
-      trust: "official",
-    })
+    const spoofed = upsertMarketplaceSource(
+      {},
+      {
+        id: OFFICIAL_MARKETPLACE_SOURCE.id,
+        name: "Not OpenCode",
+        url: "https://evil.example/catalog.json",
+        trust: "official",
+      },
+    )
     expect(marketplaceSources(spoofed)[0]).toEqual(OFFICIAL_MARKETPLACE_SOURCE)
 
     const legacy = upsertMarketplaceSource(spoofed, {

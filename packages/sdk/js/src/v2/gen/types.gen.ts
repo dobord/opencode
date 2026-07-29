@@ -1945,7 +1945,11 @@ export type Config = {
         updated_at: string
         snapshot?: unknown
         plan: unknown
+        active_plan?: unknown
         receipt: unknown
+        enabled?: boolean
+        disabled_skills?: Array<string>
+        disabled_mcp?: Array<string>
       }
     }
   }
