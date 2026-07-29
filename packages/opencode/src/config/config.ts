@@ -147,17 +147,49 @@ function globalConfigFile() {
 }
 
 function patchJsonc(input: string, patch: unknown, path: string[] = []): string {
-  if (!isRecord(patch)) {
-    const edits = modify(input, path, patch, {
+  if (!isRecord(patch)) return replaceJsonc(input, path, patch)
+
+  return Object.entries(patch).reduce((result, [key, value]) => patchJsonc(result, value, [...path, key]), input)
+}
+
+function replaceJsonc(input: string, path: string[], value: unknown) {
+  return applyEdits(
+    input,
+    modify(input, path, value, {
       formattingOptions: {
         insertSpaces: true,
         tabSize: 2,
       },
-    })
-    return applyEdits(input, edits)
-  }
+    }),
+  )
+}
 
-  return Object.entries(patch).reduce((result, [key, value]) => patchJsonc(result, value, [...path, key]), input)
+const MARKETPLACE_MANAGED_CONFIG_KEYS = [
+  "plugin",
+  "skills",
+  "agent",
+  "command",
+  "mcp",
+  "instructions",
+  "marketplace",
+] as const
+
+function mergeGlobalConfig(existing: Info, patch: Info) {
+  const merged = mergeDeep(existing, patch) as Info
+  if (!("marketplace" in patch)) return merged
+  return MARKETPLACE_MANAGED_CONFIG_KEYS.reduce(
+    (result, key) => (key in patch ? { ...result, [key]: patch[key] } : result),
+    merged,
+  )
+}
+
+function patchGlobalJsonc(input: string, patch: Info) {
+  if (!("marketplace" in patch)) return patchJsonc(input, patch)
+  const managed = MARKETPLACE_MANAGED_CONFIG_KEYS.filter((key) => key in patch)
+  const rest = Object.fromEntries(
+    Object.entries(patch).filter(([key]) => !(MARKETPLACE_MANAGED_CONFIG_KEYS as readonly string[]).includes(key)),
+  )
+  return managed.reduce((result, key) => replaceJsonc(result, [key], patch[key]), patchJsonc(input, rest))
 }
 
 function writable(info: Info) {
@@ -643,13 +675,13 @@ const layer = Layer.effect(
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeDeep(writable(existing), patch)
+        const merged = mergeGlobalConfig(writable(existing), patch)
         const serialized = JSON.stringify(merged, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
         next = merged
       } else {
-        const updated = patchJsonc(before, patch)
+        const updated = patchGlobalJsonc(before, patch)
         next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
         changed = updated !== before
         if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)

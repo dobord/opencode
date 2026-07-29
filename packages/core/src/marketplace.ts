@@ -1,4 +1,3 @@
-import npa from "npm-package-arg"
 import semver from "semver"
 
 export type MarketplaceKind = "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
@@ -889,11 +888,7 @@ function writeArray(
 
 function pluginIdentity(plugin: MarketplacePluginSpec) {
   const spec = Array.isArray(plugin) ? plugin[0] : plugin
-  try {
-    return npa(spec).name ?? spec
-  } catch {
-    return spec
-  }
+  return spec.match(/^((?:@[^/@\s]+\/)?[^@/:\s]+)(?:@.*)?$/)?.[1] ?? spec
 }
 
 function marketplaceKey(source: string, catalog: string, item: string) {
@@ -1006,7 +1001,11 @@ function equal(a: unknown, b: unknown) {
 }
 
 function clone<Value>(value: Value): Value {
-  return structuredClone(value)
+  if (Array.isArray(value)) return value.map(clone) as Value
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)])) as Value
+  }
+  return value
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

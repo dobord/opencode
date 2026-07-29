@@ -241,6 +241,41 @@ describe("marketplace installation", () => {
     expect(removed.config.marketplace?.installed?.[listing().key]).toBeUndefined()
   })
 
+  test("matches registry package identities without changing non-registry specs", () => {
+    const config: MarketplaceHostConfig = {
+      plugin: [
+        "example-plugin@1.0.0",
+        "@example/scoped-plugin@1.0.0",
+        "alias-plugin@npm:example-plugin@1.0.0",
+        "github:example/plugin",
+        "https://example.test/plugin.tgz",
+        "file:../plugin",
+      ],
+    }
+    const registry = listing()
+    registry.item.install = {
+      plugins: [
+        "example-plugin@2.0.0",
+        "@example/scoped-plugin@2.0.0",
+        "alias-plugin@npm:example-plugin@2.0.0",
+      ],
+    }
+    const conflict = installMarketplaceItem(config, registry)
+    expect(conflict.ok).toBe(false)
+    if (conflict.ok) throw new Error("Expected conflict")
+    expect(conflict.conflicts.map((item) => item.path)).toEqual([
+      "plugin.example-plugin",
+      "plugin.@example/scoped-plugin",
+      "plugin.alias-plugin",
+    ])
+
+    const remote = listing()
+    remote.item.install = {
+      plugins: ["github:other/plugin", "https://other.test/plugin.tgz", "file:../other-plugin"],
+    }
+    expect(installMarketplaceItem(config, remote).ok).toBe(true)
+  })
+
   test("preserves settings edited after installation", () => {
     const installed = installMarketplaceItem({}, listing(), { force: true })
     if (!installed.ok) throw new Error("Expected install")
@@ -360,6 +395,17 @@ describe("marketplace sources", () => {
     const removed = removeMarketplaceSource(disabled, source.id)
     expect(marketplaceSources(removed).map((item) => item.id)).toEqual(["opencode"])
     expect(removeMarketplaceSource(removed, OFFICIAL_MARKETPLACE_SOURCE.id)).toEqual(removed)
+  })
+
+  test("updates reactive configuration proxies used by the UI", () => {
+    const config = new Proxy<MarketplaceHostConfig>({ plugin: ["existing-plugin"] }, {})
+    const source = createMarketplaceSource({ url: "https://example.test/catalog.json", name: "Example" })
+    const added = upsertMarketplaceSource(config, source)
+
+    expect(added).not.toBe(config)
+    expect(added.plugin).toEqual(["existing-plugin"])
+    expect(marketplaceSources(added)).toContainEqual(source)
+    expect(config.marketplace).toBeUndefined()
   })
 
   test("does not let configured catalogs spoof official or verified provenance", () => {

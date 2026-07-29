@@ -397,6 +397,67 @@ it.effect("updates global config and omits empty shell key in jsonc", () =>
   ),
 )
 
+it.effect("replaces marketplace-managed values in global json config", () =>
+  withGlobalConfig(
+    {
+      config: {
+        command: {
+          keep: { template: "keep" },
+          remove: { template: "remove" },
+        },
+        marketplace: {
+          sources: [{ id: "remove", name: "Remove", url: "https://example.test/catalog.json" }],
+        },
+      },
+    },
+    ({ dir }) =>
+      Effect.gen(function* () {
+        yield* Config.use.updateGlobal({
+          command: { keep: { template: "keep" } },
+          marketplace: { sources: [] },
+        })
+
+        const file = path.join(dir, "opencode.json")
+        const writtenConfig = ConfigParse.schema(ConfigV1.Info, yield* FSUtil.use.readJson(file), file)
+        expect(writtenConfig.command).toEqual({ keep: { template: "keep" } })
+        expect(writtenConfig.marketplace).toEqual({ sources: [] })
+      }),
+  ),
+)
+
+it.effect("replaces marketplace-managed values in global jsonc config", () =>
+  withGlobalConfig(
+    {
+      config: {
+        command: {
+          keep: { template: "keep" },
+          remove: { template: "remove" },
+        },
+        marketplace: {
+          sources: [{ id: "remove", name: "Remove", url: "https://example.test/catalog.json" }],
+        },
+      },
+      name: "opencode.jsonc",
+    },
+    ({ dir }) =>
+      Effect.gen(function* () {
+        yield* Config.use.updateGlobal({
+          command: { keep: { template: "keep" } },
+          marketplace: { sources: [] },
+        })
+
+        const file = path.join(dir, "opencode.jsonc")
+        const writtenConfig = ConfigParse.schema(
+          ConfigV1.Info,
+          ConfigParse.jsonc(yield* FSUtil.use.readFileString(file), file),
+          file,
+        )
+        expect(writtenConfig.command).toEqual({ keep: { template: "keep" } })
+        expect(writtenConfig.marketplace).toEqual({ sources: [] })
+      }),
+  ),
+)
+
 it.instance(
   "loads formatter boolean config",
   Effect.gen(function* () {
