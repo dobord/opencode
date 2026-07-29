@@ -4,11 +4,19 @@ import {
   createMarketplaceSource,
   installMarketplaceItem,
   loadMarketplace,
+  marketplaceEnabledMcpNames,
+  marketplaceItemEnabled,
+  marketplaceMcpEnabled,
   marketplacePermissions,
   marketplacePlanSummary,
+  marketplaceSkillComponents,
+  marketplaceSkillEnabled,
   marketplaceSources,
   marketplaceStatus,
   removeMarketplaceSource,
+  setMarketplaceItemEnabled,
+  setMarketplaceMcpEnabled,
+  setMarketplaceSkillEnabled,
   toggleMarketplaceSource,
   uninstallMarketplaceItem,
   upsertMarketplaceSource,
@@ -18,11 +26,15 @@ import {
   type MarketplaceKind,
   type MarketplaceListing,
   type MarketplaceSource,
+  type MarketplaceToggleResult,
 } from "@opencode-ai/core/marketplace"
 import { Dialog } from "@opencode-ai/ui/dialog"
+import { Switch } from "@opencode-ai/ui/switch"
+import { useTheme } from "@opencode-ai/ui/theme/context"
+import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
-import { createEffect, createMemo, createResource, For, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 
 const TABS = ["discover", "installed", "updates", "sources"] as const
@@ -54,6 +66,7 @@ export function DialogMarketplace() {
 
 export function MarketplacePanel() {
   const sync = useServerSync()
+  const language = useLanguage()
   const [store, setStore] = createStore({
     config: undefined as MarketplaceHostConfig | undefined,
     revision: 0,
@@ -106,12 +119,17 @@ export function MarketplacePanel() {
     if (listing && store.selected !== listing.key) setStore("selected", listing.key)
   })
 
-  async function save(next: MarketplaceHostConfig, message: string) {
+  async function save(next: MarketplaceHostConfig, message: string, keys: string[] = []) {
     setStore("busy", true)
     try {
       await sync().updateConfig(next as Config)
       setStore("config", next)
       setStore("revision", (value) => value + 1)
+      await Promise.allSettled(
+        keys.flatMap((key) =>
+          marketplaceEnabledMcpNames(next, key).map((name) => sync().mcp.connect(sync().data.path.directory, name)),
+        ),
+      )
       showToast({ variant: "success", description: message })
       return true
     } catch (error) {
@@ -168,6 +186,7 @@ export function MarketplacePanel() {
       !(await save(
         result.config,
         `${pending.action === "update" ? "Updated" : "Installed"} ${pending.listing.item.name}`,
+        [pending.listing.key],
       ))
     ) {
       setStore("pending", pending)
@@ -176,9 +195,7 @@ export function MarketplacePanel() {
 
   async function updateAll() {
     const candidates = updates()
-    const review = candidates.find(
-      (listing) => !["official", "verified"].includes(listing.source.trust ?? "community"),
-    )
+    const review = candidates.find((listing) => !["official", "verified"].includes(listing.source.trust ?? "community"))
     if (review) {
       const result = installMarketplaceItem(config(), review)
       setStore("pending", {
@@ -200,7 +217,11 @@ export function MarketplacePanel() {
       next = result.config
     }
     if (next === config()) return
-    await save(next, `Updated ${candidates.length} marketplace item${candidates.length === 1 ? "" : "s"}`)
+    await save(
+      next,
+      `Updated ${candidates.length} marketplace item${candidates.length === 1 ? "" : "s"}`,
+      candidates.map((listing) => listing.key),
+    )
   }
 
   async function addSource() {
@@ -218,6 +239,28 @@ export function MarketplacePanel() {
         variant: "error",
         title: "Marketplace request failed",
         description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  async function toggle(result: MarketplaceToggleResult, message: string, key: string) {
+    if (!result.ok) {
+      showToast({
+        variant: "error",
+        title: language.t("marketplace.toggle.conflict.title"),
+        description: language.t("marketplace.toggle.conflict.description", {
+          settings: result.conflicts.map((conflict) => conflict.path).join(", "),
+        }),
+      })
+      return
+    }
+    if (!(await save(result.config, message, [key]))) return
+    if (result.preserved.length) {
+      showToast({
+        title: language.t("marketplace.toggle.preserved.title"),
+        description: language.t("marketplace.toggle.preserved.description", {
+          settings: result.preserved.join(", "),
+        }),
       })
     }
   }
@@ -275,31 +318,9 @@ export function MarketplacePanel() {
         </For>
       </div>
 
-      <Switch>
-        <Match when={store.tab === "sources"}>
-          <Sources
-            config={config()}
-            errors={catalog()?.errors ?? []}
-            busy={store.busy}
-            sourceURL={store.sourceURL}
-            sourceName={store.sourceName}
-            sourceTrust={store.sourceTrust}
-            setURL={(value) => setStore("sourceURL", value)}
-            setName={(value) => setStore("sourceName", value)}
-            setTrust={(value) => setStore("sourceTrust", value)}
-            add={() => void addSource()}
-            toggle={(source) =>
-              void save(
-                toggleMarketplaceSource(config(), source.id, source.enabled === false),
-                `${source.enabled === false ? "Enabled" : "Disabled"} ${source.name}`,
-              )
-            }
-            remove={(source) =>
-              void save(removeMarketplaceSource(config(), source.id), `Removed catalog ${source.name}`)
-            }
-          />
-        </Match>
-        <Match when={true}>
+      <Show
+        when={store.tab === "sources"}
+        fallback={
           <div class="flex min-h-0 flex-1 gap-3 overflow-hidden">
             <div class="flex min-h-0 w-[42%] min-w-72 flex-col overflow-hidden rounded-lg border border-border-weak bg-surface-base">
               <div class="flex gap-2 border-b border-border-weak p-2">
@@ -331,19 +352,24 @@ export function MarketplacePanel() {
                       {(listing) => (
                         <button
                           type="button"
-                          class="mb-1 flex w-full flex-col gap-1 rounded-md px-2.5 py-2 text-left hover:bg-surface-raised-base-hover"
+                          class="mb-1 flex w-full gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-surface-raised-base-hover"
                           classList={{ "bg-surface-raised-base": current()?.key === listing.key }}
                           onClick={() => setStore("selected", listing.key)}
                         >
-                          <div class="flex w-full items-center justify-between gap-2">
-                            <span class="truncate text-13-medium text-text-strong">{listing.item.name}</span>
-                            <Status value={status(listing)} />
-                          </div>
-                          <div class="line-clamp-2 text-12-regular text-text-weak">{listing.item.description}</div>
-                          <div class="flex gap-2 text-11-regular text-text-weak">
-                            <span class="capitalize">{listing.item.kind}</span>
-                            <span>v{listing.item.version}</span>
-                            <span class="truncate">{listing.source.name}</span>
+                          <PluginIcon listing={listing} size="small" />
+                          <div class="min-w-0 flex-1">
+                            <div class="flex w-full items-center justify-between gap-2">
+                              <span class="truncate text-13-medium text-text-strong">{listing.item.name}</span>
+                              <Status value={status(listing)} />
+                            </div>
+                            <div class="mt-1 line-clamp-2 text-12-regular text-text-weak">
+                              {listing.item.description}
+                            </div>
+                            <div class="mt-1 flex gap-2 text-11-regular text-text-weak">
+                              <span class="capitalize">{listing.item.kind}</span>
+                              <span>v{listing.item.version}</span>
+                              <span class="truncate">{listing.source.name}</span>
+                            </div>
                           </div>
                         </button>
                       )}
@@ -363,13 +389,40 @@ export function MarketplacePanel() {
                 }
               >
                 {(listing) => (
-                  <Details listing={listing()} status={status(listing())} busy={store.busy} action={request} />
+                  <Details
+                    listing={listing()}
+                    config={config()}
+                    status={status(listing())}
+                    busy={store.busy}
+                    action={request}
+                    toggle={(result, message) => void toggle(result, message, listing().key)}
+                  />
                 )}
               </Show>
             </div>
           </div>
-        </Match>
-      </Switch>
+        }
+      >
+        <Sources
+          config={config()}
+          errors={catalog()?.errors ?? []}
+          busy={store.busy}
+          sourceURL={store.sourceURL}
+          sourceName={store.sourceName}
+          sourceTrust={store.sourceTrust}
+          setURL={(value) => setStore("sourceURL", value)}
+          setName={(value) => setStore("sourceName", value)}
+          setTrust={(value) => setStore("sourceTrust", value)}
+          add={() => void addSource()}
+          toggle={(source) =>
+            void save(
+              toggleMarketplaceSource(config(), source.id, source.enabled === false),
+              `${source.enabled === false ? "Enabled" : "Disabled"} ${source.name}`,
+            )
+          }
+          remove={(source) => void save(removeMarketplaceSource(config(), source.id), `Removed catalog ${source.name}`)}
+        />
+      </Show>
 
       <Show when={catalog()?.errors.length}>
         <div class="rounded-md border border-border-warning bg-surface-base px-3 py-2 text-12-regular text-text-weak">
@@ -457,24 +510,80 @@ function Status(props: { value: ReturnType<typeof marketplaceStatus> }) {
   )
 }
 
+function PluginIcon(props: { listing: MarketplaceListing; size: "small" | "large" }) {
+  const theme = useTheme()
+  const [failed, setFailed] = createSignal(false)
+  const source = () =>
+    theme.mode() === "dark"
+      ? (props.listing.item.icon?.["src-dark"] ?? props.listing.item.icon?.["src-light"])
+      : props.listing.item.icon?.["src-light"]
+  const initials = () =>
+    props.listing.item.name
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase()
+
+  createEffect(() => {
+    source()
+    setFailed(false)
+  })
+
+  return (
+    <div
+      class="flex shrink-0 items-center justify-center overflow-hidden rounded-xl text-12-medium text-white shadow-sm"
+      classList={{
+        "size-10": props.size === "small",
+        "size-16 text-18-medium": props.size === "large",
+      }}
+      style={{ "background-color": props.listing.item.brand_color ?? "#5C6470" }}
+    >
+      <Show when={source() && !failed()} fallback={<span aria-hidden="true">{initials()}</span>}>
+        <img
+          src={source()}
+          alt=""
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          class="size-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      </Show>
+    </div>
+  )
+}
+
 function Details(props: {
   listing: MarketplaceListing
+  config: MarketplaceHostConfig
   status: ReturnType<typeof marketplaceStatus>
   busy: boolean
   action: (listing: MarketplaceListing) => void
+  toggle: (result: MarketplaceToggleResult, message: string) => void
 }) {
+  const language = useLanguage()
   const permissions = () => marketplacePermissions(props.listing.item)
+  const installed = () => props.config.marketplace?.installed?.[props.listing.key]
+  const enabled = () => marketplaceItemEnabled(props.config, props.listing.key)
+  const skills = () => marketplaceSkillComponents(installed()?.plan ?? props.listing.item.install)
+  const mcp = () => Object.keys(installed()?.plan.mcp ?? props.listing.item.install.mcp ?? {})
+  const stateLabel = (value: boolean) =>
+    language.t(value ? "marketplace.component.enabled" : "marketplace.component.disabled")
+
   return (
     <div class="flex min-h-full flex-col">
       <div class="flex items-start justify-between gap-4">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h3 class="text-18-medium text-text-strong">{props.listing.item.name}</h3>
-            <Status value={props.status} />
-          </div>
-          <div class="mt-1 text-12-regular text-text-weak">
-            {props.listing.item.publisher?.name ?? props.listing.catalog.publisher?.name ?? "Unknown publisher"} · v
-            {props.listing.item.version} · {props.listing.source.name}
+        <div class="flex min-w-0 items-start gap-3">
+          <PluginIcon listing={props.listing} size="large" />
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-18-medium text-text-strong">{props.listing.item.name}</h3>
+              <Status value={props.status} />
+            </div>
+            <div class="mt-1 text-12-regular text-text-weak">
+              {props.listing.item.publisher?.name ?? props.listing.catalog.publisher?.name ?? "Unknown publisher"} · v
+              {props.listing.item.version} · {props.listing.source.name}
+            </div>
           </div>
         </div>
         <button
@@ -493,6 +602,118 @@ function Details(props: {
         </div>
       </Show>
       <p class="mt-4 whitespace-pre-wrap text-13-regular leading-5 text-text-base">{props.listing.item.description}</p>
+      <Show when={installed()}>
+        <div class="mt-5 rounded-lg border border-border-weak">
+          <div class="flex items-center justify-between gap-4 p-3">
+            <div>
+              <div class="text-13-medium text-text-strong">{language.t("marketplace.component.plugin.title")}</div>
+              <div class="mt-0.5 text-11-regular text-text-weak">
+                {language.t("marketplace.component.plugin.description")}
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-11-regular text-text-weak">{stateLabel(enabled())}</span>
+              <Switch
+                checked={enabled()}
+                disabled={props.busy}
+                aria-label={language.t("marketplace.component.plugin.toggle", { name: props.listing.item.name })}
+                onChange={(checked) =>
+                  props.toggle(
+                    setMarketplaceItemEnabled(props.config, props.listing.key, checked),
+                    language.t(
+                      checked ? "marketplace.component.plugin.enabled" : "marketplace.component.plugin.disabled",
+                      { name: props.listing.item.name },
+                    ),
+                  )
+                }
+              />
+            </div>
+          </div>
+
+          <Show when={skills().length}>
+            <div class="border-t border-border-weak p-3">
+              <div class="text-12-medium text-text-strong">{language.t("marketplace.component.skills.title")}</div>
+              <div class="mt-0.5 text-11-regular text-text-weak">
+                {language.t("marketplace.component.skills.description")}
+              </div>
+              <div class="mt-2 grid gap-1">
+                <For each={skills()}>
+                  {(skill) => {
+                    const checked = () => marketplaceSkillEnabled(props.config, props.listing.key, skill.id)
+                    return (
+                      <div class="flex items-center justify-between gap-3 rounded-md bg-surface-raised-base px-2.5 py-2">
+                        <div class="min-w-0">
+                          <div class="truncate text-12-medium text-text-base">{skill.name}</div>
+                          <Show when={skill.description}>
+                            <div class="mt-0.5 line-clamp-2 text-11-regular text-text-weak">{skill.description}</div>
+                          </Show>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-2">
+                          <span class="text-11-regular text-text-weak">{stateLabel(checked())}</span>
+                          <Switch
+                            checked={checked()}
+                            disabled={props.busy || !enabled()}
+                            aria-label={language.t("marketplace.component.skill.toggle", { name: skill.name })}
+                            onChange={(value) =>
+                              props.toggle(
+                                setMarketplaceSkillEnabled(props.config, props.listing.key, skill.id, value),
+                                language.t(
+                                  value
+                                    ? "marketplace.component.skill.enabled"
+                                    : "marketplace.component.skill.disabled",
+                                  { name: skill.name },
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    )
+                  }}
+                </For>
+              </div>
+            </div>
+          </Show>
+
+          <Show when={mcp().length}>
+            <div class="border-t border-border-weak p-3">
+              <div class="text-12-medium text-text-strong">{language.t("marketplace.component.mcp.title")}</div>
+              <div class="mt-0.5 text-11-regular text-text-weak">
+                {language.t("marketplace.component.mcp.description")}
+              </div>
+              <div class="mt-2 grid gap-1">
+                <For each={mcp()}>
+                  {(name) => {
+                    const checked = () => marketplaceMcpEnabled(props.config, props.listing.key, name)
+                    return (
+                      <div class="flex items-center justify-between gap-3 rounded-md bg-surface-raised-base px-2.5 py-2">
+                        <span class="min-w-0 truncate text-12-medium text-text-base">{name}</span>
+                        <div class="flex shrink-0 items-center gap-2">
+                          <span class="text-11-regular text-text-weak">{stateLabel(checked())}</span>
+                          <Switch
+                            checked={checked()}
+                            disabled={props.busy || !enabled()}
+                            aria-label={language.t("marketplace.component.mcp.toggle", { name })}
+                            onChange={(value) =>
+                              props.toggle(
+                                setMarketplaceMcpEnabled(props.config, props.listing.key, name, value),
+                                language.t(
+                                  value ? "marketplace.component.mcp.enabled" : "marketplace.component.mcp.disabled",
+                                  { name },
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      </div>
+                    )
+                  }}
+                </For>
+              </div>
+            </div>
+          </Show>
+        </div>
+      </Show>
       <div class="mt-4 grid grid-cols-2 gap-3 text-12-regular">
         <Meta label="Type" value={props.listing.item.kind} />
         <Meta label="Trust" value={props.listing.source.trust ?? "community"} />

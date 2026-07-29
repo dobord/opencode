@@ -684,6 +684,16 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     session,
     homeSessions,
     mcp: {
+      connect: async (directory: string, name: string) => {
+        const key = directoryKey(directory)
+        if ((await serverSDK.protocol) === "v1") {
+          await sdkFor(directory).mcp.connect({ name })
+        } else {
+          await serverSDK.api.mcp.connect({ server: name, location: { directory: key } })
+        }
+        await queryClient.refetchQueries(queryOptionsApi.mcp(key))
+        await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
+      },
       toggle: async (directory: string, name: string) => {
         const key = directoryKey(directory)
         const sdk = sdkFor(key)
