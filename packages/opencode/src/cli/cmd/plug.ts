@@ -9,8 +9,17 @@ import { errorMessage } from "../../util/error"
 import { Filesystem } from "@/util/filesystem"
 import { Process } from "@/util/process"
 import { UI } from "../ui"
+import { cmd } from "./cmd"
 import { effectCmd } from "../effect-cmd"
 import { InstanceRef } from "@/effect/instance-ref"
+import {
+  createMarketplaceSource,
+  upsertMarketplaceSource,
+  type MarketplaceConfiguredTrust,
+  type MarketplaceHostConfig,
+} from "@opencode-ai/core/marketplace"
+import { Config } from "@/config/config"
+import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 
 type Spin = {
   start: (msg: string) => void
@@ -175,9 +184,8 @@ export function createPlugTask(input: PlugInput, dep: PlugDeps = defaultPlugDeps
   }
 }
 
-export const PluginCommand = effectCmd({
-  command: "plugin <module>",
-  aliases: ["plug"],
+const PluginInstallCommand = effectCmd({
+  command: "$0 <module>",
   describe: "install plugin and update config",
   builder: (yargs) =>
     yargs
@@ -227,4 +235,55 @@ export const PluginCommand = effectCmd({
     outro("Done")
     if (!ok) process.exitCode = 1
   }),
+})
+
+const PluginMarketplaceAddCommand = effectCmd({
+  command: "add <url>",
+  describe: "add a plugin marketplace catalog",
+  builder: (yargs) =>
+    yargs
+      .positional("url", {
+        type: "string",
+        describe: "catalog URL or Git repository URL",
+        demandOption: true,
+      })
+      .option("name", {
+        type: "string",
+        describe: "catalog display name",
+      })
+      .option("trust", {
+        type: "string",
+        choices: ["community", "private"] as const,
+        default: "community" as const,
+        describe: "catalog trust level",
+      }),
+  handler: Effect.fn("Cli.plugin.marketplace.add")(function* (args) {
+    const config = yield* Config.Service
+    const source = createMarketplaceSource({
+      url: String(args.url),
+      name: args.name ? String(args.name) : undefined,
+      trust: args.trust as MarketplaceConfiguredTrust,
+    })
+    const current = yield* config.getGlobal()
+    const result = yield* config.updateGlobal(
+      upsertMarketplaceSource(current as MarketplaceHostConfig, source) as ConfigV1.Info,
+    )
+    log.success(`${result.changed ? "Added" : "Already configured"} marketplace ${source.name}`)
+    log.info(source.url)
+  }),
+})
+
+const PluginMarketplaceCommand = cmd({
+  command: "marketplace",
+  describe: "manage plugin marketplace catalogs",
+  builder: (yargs) => yargs.command(PluginMarketplaceAddCommand).demandCommand(),
+  async handler() {},
+})
+
+export const PluginCommand = cmd({
+  command: "plugin",
+  aliases: ["plug"],
+  describe: "install plugins and manage plugin marketplaces",
+  builder: (yargs) => yargs.command(PluginMarketplaceCommand).command(PluginInstallCommand).demandCommand(),
+  async handler() {},
 })
