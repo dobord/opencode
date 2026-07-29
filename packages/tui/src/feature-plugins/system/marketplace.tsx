@@ -16,7 +16,7 @@ import {
   type MarketplaceHostConfig,
   type MarketplaceListing,
 } from "@opencode-ai/core/marketplace"
-import { createMemo, createResource, Show } from "solid-js"
+import { createMemo, createResource } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../../ui/dialog-select"
 import { useBindings } from "../../keymap"
 import { errorMessage } from "../../util/error"
@@ -24,10 +24,8 @@ import type { BuiltinTuiPlugin } from "../builtins"
 
 const id = "internal:marketplace"
 
-async function readConfig(api: TuiPluginApi) {
-  const result = await api.client.global.config.get()
-  if (result.error) throw new Error(errorMessage(result.error))
-  return (result.data ?? api.state.config) as Config & MarketplaceHostConfig
+function readConfig(api: TuiPluginApi) {
+  return (api.state.config ?? {}) as Config & MarketplaceHostConfig
 }
 
 async function writeConfig(api: TuiPluginApi, config: MarketplaceHostConfig) {
@@ -93,7 +91,7 @@ function details(listing: MarketplaceListing) {
 
 function View(props: { api: TuiPluginApi }) {
   const [data, actions] = createResource(async () => {
-    const config = await readConfig(props.api)
+    const config = readConfig(props.api)
     return { config, catalog: await loadMarketplace({ config }) }
   })
   const rows = createMemo<DialogSelectOption<string>[]>(() =>
@@ -180,54 +178,42 @@ function View(props: { api: TuiPluginApi }) {
   }))
 
   return (
-    <Show
-      when={data()}
-      fallback={
+    <DialogSelect
+      title="Marketplace"
+      placeholder="Search plugins, skills, agents, commands, MCP servers…"
+      options={rows()}
+      emptyView={
         <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
-          <text fg={props.api.theme.current.text}>Marketplace</text>
           <text fg={props.api.theme.current.textMuted}>
-            {data.error ? errorMessage(data.error) : "Loading catalogs…"}
+            {data.loading
+              ? "Loading catalogs…"
+              : data.error
+                ? errorMessage(data.error)
+                : "No marketplace items. Add a catalog with Marketplace: Sources."}
           </text>
         </box>
       }
-    >
-      {(value) => (
-        <DialogSelect
-          title="Marketplace"
-          placeholder="Search plugins, skills, agents, commands, MCP servers…"
-          options={rows()}
-          emptyView={
-            <box paddingLeft={2} paddingRight={2} paddingBottom={1}>
-              <text fg={props.api.theme.current.textMuted}>
-                No marketplace items. Add a catalog with Marketplace: Sources.
-              </text>
-            </box>
-          }
-          footer={
-            <box flexDirection="column">
-              <text fg={props.api.theme.current.textMuted}>
-                ctrl+r reload · ctrl+s sources · enter install/update/remove
-              </text>
-              <Show when={value().catalog.errors.length}>
-                <text fg={props.api.theme.current.warning}>
-                  {value()
-                    .catalog.errors.map((error) => `${error.source.name}: ${error.message}`)
-                    .join(" · ")}
-                </text>
-              </Show>
-            </box>
-          }
-          onSelect={(option) => void apply(option.value)}
-        />
-      )}
-    </Show>
+      footer={
+        <box flexDirection="column">
+          <text fg={props.api.theme.current.textMuted}>
+            ctrl+r reload · ctrl+s sources · enter install/update/remove
+          </text>
+          {data()?.catalog.errors.length ? (
+            <text fg={props.api.theme.current.warning}>
+              {data()!.catalog.errors.map((error) => `${error.source.name}: ${error.message}`).join(" · ")}
+            </text>
+          ) : null}
+        </box>
+      }
+      onSelect={(option) => void apply(option.value)}
+    />
   )
 }
 
 function Sources(props: { api: TuiPluginApi }) {
-  const [config, actions] = createResource(() => readConfig(props.api))
+  const config = () => readConfig(props.api)
   const rows = createMemo<DialogSelectOption<string>[]>(() =>
-    marketplaceSources(config() ?? {}).map((source) => ({
+    marketplaceSources(config()).map((source) => ({
       title: source.name,
       value: source.id,
       category: source.trust ?? "community",
@@ -245,7 +231,6 @@ function Sources(props: { api: TuiPluginApi }) {
     try {
       await writeConfig(props.api, next)
       props.api.ui.toast({ variant: "success", message })
-      await actions.refetch()
     } catch (error) {
       props.api.ui.toast({ variant: "error", message: errorMessage(error) })
     }
@@ -260,7 +245,7 @@ function Sources(props: { api: TuiPluginApi }) {
     }
     try {
       const source = createMarketplaceSource({ url: raw })
-      await save(upsertMarketplaceSource(config() ?? {}, source), `Added ${source.name}`)
+      await save(upsertMarketplaceSource(config(), source), `Added ${source.name}`)
     } catch (error) {
       props.api.ui.toast({ variant: "error", message: errorMessage(error) })
       showSources(props.api)
@@ -268,7 +253,7 @@ function Sources(props: { api: TuiPluginApi }) {
   }
 
   async function remove() {
-    const source = marketplaceSources(config() ?? {}).find((item) => item.id === current)
+    const source = marketplaceSources(config()).find((item) => item.id === current)
     if (!source || source.id === OFFICIAL_MARKETPLACE_SOURCE.id) return
     if (
       !(await confirm(
@@ -280,7 +265,7 @@ function Sources(props: { api: TuiPluginApi }) {
       showSources(props.api)
       return
     }
-    await save(removeMarketplaceSource(config() ?? {}, source.id), `Removed ${source.name}`)
+    await save(removeMarketplaceSource(config(), source.id), `Removed ${source.name}`)
   }
 
   useBindings(() => ({
@@ -292,36 +277,24 @@ function Sources(props: { api: TuiPluginApi }) {
   }))
 
   return (
-    <Show
-      when={config()}
-      fallback={
-        <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
-          <text fg={props.api.theme.current.text}>Marketplace sources</text>
-          <text fg={props.api.theme.current.textMuted}>{config.error ? errorMessage(config.error) : "Loading…"}</text>
-        </box>
+    <DialogSelect
+      title="Marketplace sources"
+      options={rows()}
+      onMove={(option) => (current = option.value)}
+      footer={
+        <text fg={props.api.theme.current.textMuted}>
+          ctrl+a add · ctrl+d remove · ctrl+b back · enter enable/disable
+        </text>
       }
-    >
-      {(value) => (
-        <DialogSelect
-          title="Marketplace sources"
-          options={rows()}
-          onMove={(option) => (current = option.value)}
-          footer={
-            <text fg={props.api.theme.current.textMuted}>
-              ctrl+a add · ctrl+d remove · ctrl+b back · enter enable/disable
-            </text>
-          }
-          onSelect={(option) => {
-            const source = marketplaceSources(value()).find((item) => item.id === option.value)
-            if (!source) return
-            void save(
-              toggleMarketplaceSource(value(), source.id, source.enabled === false),
-              `${source.enabled === false ? "Enabled" : "Disabled"} ${source.name}`,
-            )
-          }}
-        />
-      )}
-    </Show>
+      onSelect={(option) => {
+        const source = marketplaceSources(config()).find((item) => item.id === option.value)
+        if (!source) return
+        void save(
+          toggleMarketplaceSource(config(), source.id, source.enabled === false),
+          `${source.enabled === false ? "Enabled" : "Disabled"} ${source.name}`,
+        )
+      }}
+    />
   )
 }
 
@@ -342,7 +315,7 @@ const tui: TuiPlugin = async (api) => {
         category: "System",
         namespace: "palette",
         run() {
-          show(api)
+          setTimeout(() => show(api), 0)
         },
       },
       {
@@ -351,7 +324,7 @@ const tui: TuiPlugin = async (api) => {
         category: "System",
         namespace: "palette",
         run() {
-          showSources(api)
+          setTimeout(() => showSources(api), 0)
         },
       },
     ],
