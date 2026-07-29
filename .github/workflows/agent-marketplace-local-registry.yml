@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - agent/marketplace-local-registry
+  pull_request:
+    branches:
+      - marketplace
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
@@ -17,6 +24,7 @@ jobs:
       - name: Checkout branch
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          ref: agent/marketplace-local-registry
           fetch-depth: 0
 
       - name: Decode and apply implementation patch
