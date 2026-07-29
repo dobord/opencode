@@ -9,6 +9,14 @@ package. Open **Settings → Marketplace** in the desktop app, or run **Marketpl
 An installed package can remain installed while it is disabled. You can also enable or disable each declared skill
 and MCP server independently.
 
+Marketplace sources, installed-package state, and component switches are stored in OpenCode's local application
+registry, not in `opencode.json` or `opencode.jsonc`. The active install plans are projected into the effective
+configuration in memory. Installing, updating, disabling, or removing a package therefore leaves the user's config
+file unchanged.
+
+Run `opencode plugin marketplace export --name team` to export the installed set as a portable profile. Source
+request headers, installation receipts, and other local implementation state are omitted from the export.
+
 ---
 
 ## Add a catalog

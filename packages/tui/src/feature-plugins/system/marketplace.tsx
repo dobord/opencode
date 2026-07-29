@@ -33,8 +33,10 @@ import type { BuiltinTuiPlugin } from "../builtins"
 
 const id = "internal:marketplace"
 
-function readConfig(api: TuiPluginApi) {
-  return (api.state.config ?? {}) as Config & MarketplaceHostConfig
+async function readConfig(api: TuiPluginApi) {
+  const result = await api.client.global.config.get()
+  if (result.error) throw new Error(errorMessage(result.error))
+  return (result.data ?? {}) as Config & MarketplaceHostConfig
 }
 
 async function writeConfig(api: TuiPluginApi, config: MarketplaceHostConfig) {
@@ -138,7 +140,7 @@ async function saveToggle(
 
 function View(props: { api: TuiPluginApi }) {
   const [data, actions] = createResource(async () => {
-    const config = readConfig(props.api)
+    const config = await readConfig(props.api)
     return { config, catalog: await loadMarketplace({ config }) }
   })
   const rows = createMemo<DialogSelectOption<string>[]>(() =>
@@ -270,12 +272,14 @@ function View(props: { api: TuiPluginApi }) {
 }
 
 function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
-  const config = () => readConfig(props.api)
-  const installed = () => config().marketplace?.installed?.[props.listing.key]
+  const [config] = createResource(() => readConfig(props.api))
+  const installed = () => config()?.marketplace?.installed?.[props.listing.key]
   const rows = createMemo<DialogSelectOption<string>[]>(() => {
+    const cfg = config()
+    if (!cfg) return []
     const state = installed()
     if (!state) return []
-    const pluginEnabled = marketplaceItemEnabled(config(), props.listing.key)
+    const pluginEnabled = marketplaceItemEnabled(cfg, props.listing.key)
     return [
       {
         title: props.listing.item.name,
@@ -289,7 +293,7 @@ function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
         footer: toggleStatus(props.api, pluginEnabled),
       },
       ...marketplaceSkillComponents(state.plan).map((skill) => {
-        const enabled = marketplaceSkillEnabled(config(), props.listing.key, skill.id)
+        const enabled = marketplaceSkillEnabled(cfg, props.listing.key, skill.id)
         return {
           title: skill.name,
           value: `skill:${skill.id}`,
@@ -300,7 +304,7 @@ function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
         }
       }),
       ...Object.keys(state.plan.mcp ?? {}).map((name) => {
-        const enabled = marketplaceMcpEnabled(config(), props.listing.key, name)
+        const enabled = marketplaceMcpEnabled(cfg, props.listing.key, name)
         return {
           title: name,
           value: `mcp:${name}`,
@@ -326,7 +330,9 @@ function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
       showComponents(props.api, props.listing)
       return
     }
-    const result = uninstallMarketplaceItem(config(), props.listing.key)
+    const cfg = config()
+    if (!cfg) return
+    const result = uninstallMarketplaceItem(cfg, props.listing.key)
     try {
       await writeConfig(props.api, result.config)
       props.api.ui.toast({ variant: "success", message: `Removed ${props.listing.item.name}` })
@@ -352,30 +358,32 @@ function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
       options={rows()}
       footer={<text fg={props.api.theme.current.textMuted}>enter toggle · ctrl+d uninstall · ctrl+b back</text>}
       onSelect={(option) => {
+        const cfg = config()
+        if (!cfg) return
         const state = installed()
         if (!state) return
         if (option.value === "plugin") {
-          const enabled = !marketplaceItemEnabled(config(), props.listing.key)
+          const enabled = !marketplaceItemEnabled(cfg, props.listing.key)
           void saveToggle(
             props.api,
-            setMarketplaceItemEnabled(config(), props.listing.key, enabled),
+            setMarketplaceItemEnabled(cfg, props.listing.key, enabled),
             `${enabled ? "Enabled" : "Disabled"} ${props.listing.item.name}`,
             props.listing.key,
             () => showComponents(props.api, props.listing),
           )
           return
         }
-        if (!marketplaceItemEnabled(config(), props.listing.key)) {
+        if (!marketplaceItemEnabled(cfg, props.listing.key)) {
           props.api.ui.toast({ variant: "warning", message: "Enable the plugin before changing its components" })
           showComponents(props.api, props.listing)
           return
         }
         if (option.value.startsWith("skill:")) {
           const id = option.value.slice("skill:".length)
-          const enabled = !marketplaceSkillEnabled(config(), props.listing.key, id)
+          const enabled = !marketplaceSkillEnabled(cfg, props.listing.key, id)
           void saveToggle(
             props.api,
-            setMarketplaceSkillEnabled(config(), props.listing.key, id, enabled),
+            setMarketplaceSkillEnabled(cfg, props.listing.key, id, enabled),
             `${enabled ? "Enabled" : "Disabled"} skill ${option.title}`,
             props.listing.key,
             () => showComponents(props.api, props.listing),
@@ -383,10 +391,10 @@ function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
           return
         }
         const name = option.value.slice("mcp:".length)
-        const enabled = !marketplaceMcpEnabled(config(), props.listing.key, name)
+        const enabled = !marketplaceMcpEnabled(cfg, props.listing.key, name)
         void saveToggle(
           props.api,
-          setMarketplaceMcpEnabled(config(), props.listing.key, name, enabled),
+          setMarketplaceMcpEnabled(cfg, props.listing.key, name, enabled),
           `${enabled ? "Enabled" : "Disabled"} MCP server ${name}`,
           props.listing.key,
           () => showComponents(props.api, props.listing),
@@ -397,9 +405,9 @@ function Components(props: { api: TuiPluginApi; listing: MarketplaceListing }) {
 }
 
 function Sources(props: { api: TuiPluginApi }) {
-  const config = () => readConfig(props.api)
+  const [config] = createResource(() => readConfig(props.api))
   const rows = createMemo<DialogSelectOption<string>[]>(() =>
-    marketplaceSources(config()).map((source) => ({
+    marketplaceSources(config() ?? {}).map((source) => ({
       title: source.name,
       value: source.id,
       category: source.trust ?? "community",
@@ -431,7 +439,9 @@ function Sources(props: { api: TuiPluginApi }) {
     }
     try {
       const source = createMarketplaceSource({ url: raw })
-      await save(upsertMarketplaceSource(config(), source), `Added ${source.name}`)
+      const cfg = config()
+      if (!cfg) return
+      await save(upsertMarketplaceSource(cfg, source), `Added ${source.name}`)
     } catch (error) {
       props.api.ui.toast({ variant: "error", message: errorMessage(error) })
       showSources(props.api)
@@ -439,7 +449,9 @@ function Sources(props: { api: TuiPluginApi }) {
   }
 
   async function remove() {
-    const source = marketplaceSources(config()).find((item) => item.id === current)
+    const cfg = config()
+    if (!cfg) return
+    const source = marketplaceSources(cfg).find((item) => item.id === current)
     if (!source || source.id === OFFICIAL_MARKETPLACE_SOURCE.id) return
     if (
       !(await confirm(
@@ -451,7 +463,7 @@ function Sources(props: { api: TuiPluginApi }) {
       showSources(props.api)
       return
     }
-    await save(removeMarketplaceSource(config(), source.id), `Removed ${source.name}`)
+    await save(removeMarketplaceSource(cfg, source.id), `Removed ${source.name}`)
   }
 
   useBindings(() => ({
@@ -473,10 +485,12 @@ function Sources(props: { api: TuiPluginApi }) {
         </text>
       }
       onSelect={(option) => {
-        const source = marketplaceSources(config()).find((item) => item.id === option.value)
+        const cfg = config()
+        if (!cfg) return
+        const source = marketplaceSources(cfg).find((item) => item.id === option.value)
         if (!source) return
         void save(
-          toggleMarketplaceSource(config(), source.id, source.enabled === false),
+          toggleMarketplaceSource(cfg, source.id, source.enabled === false),
           `${source.enabled === false ? "Enabled" : "Disabled"} ${source.name}`,
         )
       }}

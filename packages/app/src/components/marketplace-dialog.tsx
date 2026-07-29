@@ -122,12 +122,13 @@ export function MarketplacePanel() {
   async function save(next: MarketplaceHostConfig, message: string, keys: string[] = []) {
     setStore("busy", true)
     try {
-      await sync().updateConfig(next as Config)
-      setStore("config", next)
+      const response = await sync().updateConfig(next as Config)
+      const saved = (response.data ?? next) as MarketplaceHostConfig
+      setStore("config", saved)
       setStore("revision", (value) => value + 1)
       await Promise.allSettled(
         keys.flatMap((key) =>
-          marketplaceEnabledMcpNames(next, key).map((name) => sync().mcp.connect(sync().data.path.directory, name)),
+          marketplaceEnabledMcpNames(saved, key).map((name) => sync().mcp.connect(sync().data.path.directory, name)),
         ),
       )
       showToast({ variant: "success", description: message })

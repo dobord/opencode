@@ -1,5 +1,6 @@
 import { intro, log, outro, spinner } from "@clack/prompts"
 import { Effect } from "effect"
+import path from "path"
 
 import { ConfigPaths } from "@/config/paths"
 import { Global } from "@opencode-ai/core/global"
@@ -18,6 +19,7 @@ import {
   type MarketplaceConfiguredTrust,
   type MarketplaceHostConfig,
 } from "@opencode-ai/core/marketplace"
+import { exportMarketplaceProfile } from "@opencode-ai/core/marketplace-profile"
 import { Config } from "@/config/config"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 
@@ -273,10 +275,40 @@ const PluginMarketplaceAddCommand = effectCmd({
   }),
 })
 
+const PluginMarketplaceExportCommand = effectCmd({
+  command: "export [file]",
+  describe: "export the installed marketplace set as a portable profile",
+  builder: (yargs) =>
+    yargs
+      .positional("file", {
+        type: "string",
+        describe: "output file; omit to print JSON to stdout",
+      })
+      .option("name", {
+        type: "string",
+        default: "default",
+        describe: "profile name",
+      }),
+  handler: Effect.fn("Cli.plugin.marketplace.export")(function* (args) {
+    const config = yield* Config.Service
+    const current = (yield* config.getGlobal()) as MarketplaceHostConfig
+    const profile = exportMarketplaceProfile(current.marketplace ?? {}, { name: String(args.name) })
+    const output = `${JSON.stringify(profile, null, 2)}\n`
+    if (args.file) {
+      const file = path.resolve(String(args.file))
+      yield* Effect.promise(() => Filesystem.write(file, output))
+      log.success(`Exported marketplace profile to ${file}`)
+      return
+    }
+    process.stdout.write(output)
+  }),
+})
+
 const PluginMarketplaceCommand = cmd({
   command: "marketplace",
   describe: "manage plugin marketplace catalogs",
-  builder: (yargs) => yargs.command(PluginMarketplaceAddCommand).demandCommand(),
+  builder: (yargs) =>
+    yargs.command(PluginMarketplaceAddCommand).command(PluginMarketplaceExportCommand).demandCommand(),
   async handler() {},
 })
 

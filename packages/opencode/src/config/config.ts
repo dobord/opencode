@@ -5,6 +5,7 @@ import path from "path"
 import { pathToFileURL } from "url"
 import os from "os"
 import { mergeDeep } from "remeda"
+import { isDeepStrictEqual } from "util"
 import { Global } from "@opencode-ai/core/global"
 import fsNode from "fs/promises"
 import { Flag } from "@opencode-ai/core/flag/flag"
@@ -20,7 +21,6 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
 import { Context, Duration, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
@@ -35,6 +35,9 @@ import { ConfigPlugin } from "./plugin"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import type { MarketplaceHostConfig } from "@opencode-ai/core/marketplace"
+import { composeMarketplaceConfig, decomposeMarketplaceConfig } from "@/marketplace/overlay"
+import * as MarketplaceRegistry from "@/marketplace/registry"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -174,22 +177,26 @@ const MARKETPLACE_MANAGED_CONFIG_KEYS = [
   "marketplace",
 ] as const
 
-function mergeGlobalConfig(existing: Info, patch: Info) {
+function mergeGlobalConfig(existing: Info, patch: Info, replaceManaged = false) {
   const merged = mergeDeep(existing, patch) as Info
-  if (!("marketplace" in patch)) return merged
-  return MARKETPLACE_MANAGED_CONFIG_KEYS.reduce(
-    (result, key) => (key in patch ? { ...result, [key]: patch[key] } : result),
-    merged,
-  )
+  if (!replaceManaged) return merged
+  const result = merged as Record<string, unknown>
+  for (const key of MARKETPLACE_MANAGED_CONFIG_KEYS) {
+    if (key in patch) result[key] = patch[key]
+    else delete result[key]
+  }
+  return merged
 }
 
-function patchGlobalJsonc(input: string, patch: Info) {
-  if (!("marketplace" in patch)) return patchJsonc(input, patch)
-  const managed = MARKETPLACE_MANAGED_CONFIG_KEYS.filter((key) => key in patch)
+function patchGlobalJsonc(input: string, patch: Info, replaceManaged = false) {
+  if (!replaceManaged) return patchJsonc(input, patch)
   const rest = Object.fromEntries(
     Object.entries(patch).filter(([key]) => !(MARKETPLACE_MANAGED_CONFIG_KEYS as readonly string[]).includes(key)),
   )
-  return managed.reduce((result, key) => replaceJsonc(result, [key], patch[key]), patchJsonc(input, rest))
+  return MARKETPLACE_MANAGED_CONFIG_KEYS.reduce(
+    (result, key) => replaceJsonc(result, [key], patch[key]),
+    patchJsonc(input, rest),
+  )
 }
 
 function writable(info: Info) {
@@ -213,6 +220,7 @@ const layer = Layer.effect(
     const env = yield* Env.Service
     const npmSvc = yield* Npm.Service
     const http = yield* HttpClient.HttpClient
+    const marketplace = yield* MarketplaceRegistry.Service
 
     const readConfigFile = (filepath: string) => fs.readFileStringSafe(filepath).pipe(Effect.orDie)
 
@@ -275,7 +283,7 @@ const layer = Layer.effect(
       return yield* loadConfig(text, { path: filepath }, env)
     })
 
-    const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
+    const loadGlobalRaw = Effect.fnUntraced(function* (env?: Record<string, string>) {
       let result: Info = {}
       // Seed the default global config with the schema for editor completion, but avoid writing when the user
       // explicitly routes config through env-provided paths or content.
@@ -307,7 +315,14 @@ const layer = Layer.effect(
         )
       }
 
+      delete result.marketplace
       return result
+    })
+
+    const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
+      const raw = yield* loadGlobalRaw(env)
+      const state = yield* marketplace.read()
+      return composeMarketplaceConfig(raw as MarketplaceHostConfig, state) as Info
     })
 
     const [cachedGlobal, invalidateGlobal] = yield* Effect.cachedInvalidateWithTTL(
@@ -667,6 +682,40 @@ const layer = Layer.effect(
     })
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
+      const requestedState = (config as MarketplaceHostConfig).marketplace
+      if (requestedState) {
+        const file = globalConfigFile()
+        const before = (yield* readConfigFile(file)) ?? "{}"
+        const raw = yield* loadGlobalRaw()
+        const currentState = yield* marketplace.read()
+        const current = composeMarketplaceConfig(raw as MarketplaceHostConfig, currentState) as Info
+        const incoming = mergeGlobalConfig(current, config, true)
+        const stored = yield* marketplace.replace(requestedState).pipe(Effect.orDie)
+        incoming.marketplace = stored.state
+
+        const desired = decomposeMarketplaceConfig(
+          incoming as MarketplaceHostConfig,
+          raw as MarketplaceHostConfig,
+          stored.state,
+        ) as Info
+        const patch = writableGlobal(desired)
+        const rawChanged = !isDeepStrictEqual(writableGlobal(raw), patch)
+
+        if (rawChanged) {
+          if (!file.endsWith(".jsonc")) {
+            yield* fs.writeFileString(file, JSON.stringify(patch, null, 2)).pipe(Effect.orDie)
+          } else {
+            const updated = patchGlobalJsonc(before, patch, true)
+            if (updated !== before) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+          }
+        }
+
+        const changed = rawChanged || stored.changed
+        const next = composeMarketplaceConfig(patch as MarketplaceHostConfig, stored.state) as Info
+        if (changed) yield* invalidate()
+        return { info: next, changed }
+      }
+
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
       const patch = writableGlobal(config)
@@ -675,13 +724,13 @@ const layer = Layer.effect(
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeGlobalConfig(writable(existing), patch)
+        const merged = mergeGlobalConfig(writable(existing), patch, false)
         const serialized = JSON.stringify(merged, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
         next = merged
       } else {
-        const updated = patchGlobalJsonc(before, patch)
+        const updated = patchGlobalJsonc(before, patch, false)
         next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
         changed = updated !== before
         if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
@@ -707,7 +756,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Auth.node, Account.node, Env.node, Npm.node, httpClient],
+  deps: [FSUtil.node, Auth.node, Account.node, Env.node, Npm.node, MarketplaceRegistry.node, httpClient],
 })
 
 export * as Config from "./config"

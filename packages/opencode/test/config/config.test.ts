@@ -167,15 +167,17 @@ const withInstanceDir = <A, E, R>(dir: string, effect: Effect.Effect<A, E, R>) =
 const withGlobalConfigDir = <A, E, R>(dir: string, effect: Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
     Effect.gen(function* () {
-      const previous = Global.Path.config
+      const previous = { config: Global.Path.config, data: Global.Path.data }
       ;(Global.Path as { config: string }).config = dir
+      ;(Global.Path as { data: string }).data = path.join(dir, "data")
       yield* clearEffect(true)
       return previous
     }),
     () => effect,
     (previous) =>
       Effect.gen(function* () {
-        ;(Global.Path as { config: string }).config = previous
+        ;(Global.Path as { config: string }).config = previous.config
+        ;(Global.Path as { data: string }).data = previous.data
         yield* clearEffect(true)
       }),
   )
@@ -397,63 +399,87 @@ it.effect("updates global config and omits empty shell key in jsonc", () =>
   ),
 )
 
-it.effect("replaces marketplace-managed values in global json config", () =>
+it.effect("stores marketplace installs outside the global json config", () =>
   withGlobalConfig(
     {
       config: {
         command: {
           keep: { template: "keep" },
-          remove: { template: "remove" },
-        },
-        marketplace: {
-          sources: [{ id: "remove", name: "Remove", url: "https://example.test/catalog.json" }],
         },
       },
     },
     ({ dir }) =>
       Effect.gen(function* () {
-        yield* Config.use.updateGlobal({
-          command: { keep: { template: "keep" } },
-          marketplace: { sources: [] },
+        const file = path.join(dir, "opencode.json")
+        const before = yield* FSUtil.use.readFileString(file)
+        const plan = { commands: { review: { template: "review" } } }
+        const result = yield* Config.use.updateGlobal({
+          $schema: "https://opencode.ai/config.json",
+          command: { keep: { template: "keep" }, review: { template: "review" } },
+          marketplace: {
+            revision: 0,
+            installed: {
+              "community:tools:review": {
+                source: "community",
+                catalog: "tools",
+                item: "review",
+                name: "Review",
+                kind: "command",
+                version: "1.0.0",
+                fingerprint: "review-v1",
+                installed_at: "2026-07-29T00:00:00.000Z",
+                updated_at: "2026-07-29T00:00:00.000Z",
+                plan,
+                active_plan: plan,
+                receipt: {},
+              },
+            },
+          },
         })
 
-        const file = path.join(dir, "opencode.json")
-        const writtenConfig = ConfigParse.schema(ConfigV1.Info, yield* FSUtil.use.readJson(file), file)
-        expect(writtenConfig.command).toEqual({ keep: { template: "keep" } })
-        expect(writtenConfig.marketplace).toEqual({ sources: [] })
+        expect(yield* FSUtil.use.readFileString(file)).toBe(before)
+        expect(result.info.command).toEqual({ keep: { template: "keep" }, review: { template: "review" } })
+        expect(result.info.marketplace?.revision).toBe(1)
+        expect(yield* FSUtil.use.readJson(path.join(Global.Path.data, "marketplace", "registry.json"))).toMatchObject({
+          schema: "opencode.marketplace.registry/v1",
+          revision: 1,
+          state: { installed: { "community:tools:review": { item: "review" } } },
+        })
       }),
   ),
 )
 
-it.effect("replaces marketplace-managed values in global jsonc config", () =>
+it.effect("stores marketplace sources outside jsonc without changing comments", () =>
   withGlobalConfig(
     {
       config: {
-        command: {
-          keep: { template: "keep" },
-          remove: { template: "remove" },
-        },
-        marketplace: {
-          sources: [{ id: "remove", name: "Remove", url: "https://example.test/catalog.json" }],
-        },
+        model: "test/model",
       },
       name: "opencode.jsonc",
     },
     ({ dir }) =>
       Effect.gen(function* () {
-        yield* Config.use.updateGlobal({
-          command: { keep: { template: "keep" } },
-          marketplace: { sources: [] },
+        const file = path.join(dir, "opencode.jsonc")
+        const before = yield* FSUtil.use.readFileString(file)
+        const result = yield* Config.use.updateGlobal({
+          $schema: "https://opencode.ai/config.json",
+          model: "test/model",
+          marketplace: {
+            revision: 0,
+            sources: [
+              {
+                id: "community",
+                name: "Community",
+                url: "https://example.test/catalog.json",
+                trust: "community",
+              },
+            ],
+          },
         })
 
-        const file = path.join(dir, "opencode.jsonc")
-        const writtenConfig = ConfigParse.schema(
-          ConfigV1.Info,
-          ConfigParse.jsonc(yield* FSUtil.use.readFileString(file), file),
-          file,
-        )
-        expect(writtenConfig.command).toEqual({ keep: { template: "keep" } })
-        expect(writtenConfig.marketplace).toEqual({ sources: [] })
+        expect(yield* FSUtil.use.readFileString(file)).toBe(before)
+        expect(result.info.marketplace?.sources?.map((source) => source.id)).toEqual(["community"])
+        expect(result.info.marketplace?.revision).toBe(1)
       }),
   ),
 )

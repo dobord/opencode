@@ -1918,6 +1918,7 @@ export type Config = {
       ]
   >
   marketplace?: {
+    revision?: number
     sources?: Array<{
       id: string
       name: string

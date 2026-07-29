@@ -133,6 +133,7 @@ export type MarketplaceInstalled = {
 }
 
 export type MarketplaceState = {
+  revision?: number
   sources?: MarketplaceSource[]
   installed?: Record<string, MarketplaceInstalled>
 }
