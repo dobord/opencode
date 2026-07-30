@@ -7,7 +7,8 @@
   "sdk": "success",
   "format": "success",
   "tests": "success",
-  "typecheck": "failure",
-  "httpapi": "skipped",
-  "verify": "skipped"
+  "typecheck": "success",
+  "httpapi": "retry",
+  "verify": "retry",
+  "retry_reason": "trigger full push validation from a non-bot commit"
 }
