@@ -1,9 +1,6 @@
 name: Apply Marketplace SQLite, CAS, and API
 
 on:
-  push:
-    branches:
-      - agent/marketplace-sqlite-api-cache
   pull_request:
     branches:
       - agent/marketplace-local-registry
@@ -30,6 +27,16 @@ jobs:
       - name: Apply implementation
         shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path('.github/agent-marketplace-sqlite-api-cache/apply.py')
+          text = script.read_text()
+          old = "replace('packages/opencode/test/config/config.test.ts', 'LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node])\\n', 'LayerNode.group([Config.node, MarketplaceRegistry.node, FSUtil.node, Env.node, CrossSpawnSpawner.node])\\n')"
+          new = "replace('packages/opencode/test/config/config.test.ts', 'LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [', 'LayerNode.group([Config.node, MarketplaceRegistry.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [')"
+          if old not in text:
+              raise SystemExit('config test bootstrap anchor was not found in apply.py')
+          script.write_text(text.replace(old, new, 1))
+          PY
           python3 .github/agent-marketplace-sqlite-api-cache/apply.py
           rm -rf .github/agent-marketplace-sqlite-api-cache
           rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
