@@ -4,6 +4,7 @@ import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
 import { normalizeMarketplaceURL } from "@opencode-ai/core/marketplace"
 
+const FILE_URL = /^file:/i
 const WINDOWS_DRIVE = /^[A-Za-z]:[\\/]/
 const WINDOWS_UNC = /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+/
 const URI_SCHEME = /^[A-Za-z][A-Za-z\d+.-]*:/
@@ -22,7 +23,7 @@ function expandHome(value: string) {
 }
 
 function isFileReference(value: string) {
-  if (value.startsWith("file:")) return true
+  if (FILE_URL.test(value)) return true
   if (WINDOWS_DRIVE.test(value) || WINDOWS_UNC.test(value)) return true
   return !URI_SCHEME.test(value)
 }
@@ -48,7 +49,7 @@ export async function resolveMarketplaceSourceReference(
     }
   }
 
-  const url = reference.startsWith("file:")
+  const url = FILE_URL.test(reference)
     ? new URL(normalizeMarketplaceURL(reference))
     : pathToFileURL(path.resolve(cwd, expandHome(reference)))
 
