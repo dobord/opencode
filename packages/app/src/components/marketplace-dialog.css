@@ -1,3 +1,4 @@
+/* Marketplace is rendered inside Settings V2; keep its visual state on the shared V2 tokens and primitives. */
 [data-component="marketplace-panel"] {
   box-sizing: border-box;
   color: var(--v2-text-text-base);
