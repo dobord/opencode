@@ -38,6 +38,45 @@ jobs:
           script.write_text(text.replace(old, new, 1))
           PY
           python3 .github/agent-marketplace-sqlite-api-cache/apply.py
+          python3 - <<'PY'
+          from pathlib import Path
+          build = Path('packages/sdk/js/script/build.ts')
+          text = build.read_text()
+          old = '''  for (const name of Object.keys(schemas)) {
+            if (/^SessionNext\\w+1$/.test(name) && !reachable.has(name)) delete schemas[name]
+          }
+          await Bun.write("./openapi.json", JSON.stringify(document))'''
+          new = '''  const rewriteSchemaRef = (value: unknown, from: string, to: string): void => {
+            if (Array.isArray(value)) {
+              value.forEach((item) => rewriteSchemaRef(item, from, to))
+              return
+            }
+            if (typeof value !== "object" || value === null) return
+            for (const [key, child] of Object.entries(value)) {
+              if (key === "$ref" && child === `#/components/schemas/${from}`) {
+                ;(value as Record<string, unknown>)[key] = `#/components/schemas/${to}`
+                continue
+              }
+              rewriteSchemaRef(child, from, to)
+            }
+          }
+          for (const name of Object.keys(schemas)) {
+            if (!/^SessionNext\\w+1$/.test(name)) continue
+            if (!reachable.has(name)) {
+              delete schemas[name]
+              continue
+            }
+            const original = name.slice(0, -1)
+            if (!(original in schemas)) continue
+            if (JSON.stringify(schemas[name]) !== JSON.stringify(schemas[original])) continue
+            rewriteSchemaRef(document, name, original)
+            delete schemas[name]
+          }
+          await Bun.write("./openapi.json", JSON.stringify(document))'''
+          if old not in text:
+              raise SystemExit('SDK duplicate-schema cleanup anchor was not found')
+          build.write_text(text.replace(old, new, 1))
+          PY
           rm -rf .github/agent-marketplace-sqlite-api-cache
           rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
 
@@ -84,6 +123,7 @@ jobs:
             packages/app/src/components/marketplace-dialog.tsx \
             packages/app/src/context/server-sync.tsx \
             packages/tui/src/feature-plugins/system/marketplace.tsx \
+            packages/sdk/js/script/build.ts \
             packages/web/src/content/docs/marketplace.mdx \
             packages/web/src/content/docs/ru/marketplace.mdx
 
