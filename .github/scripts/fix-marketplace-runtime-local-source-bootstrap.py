@@ -7,6 +7,9 @@ replacements = {
     'expect(await first.text()).toBe(\'{"version":1}\')': 'expect(yield* Effect.promise(() => first.text())).toBe(\'{"version":1}\')',
     'expect(await cached.text()).toBe(\'{"version":1}\')': 'expect(yield* Effect.promise(() => cached.text())).toBe(\'{"version":1}\')',
     'expect(await refreshed.text()).toBe(\'{"version":2}\')': 'expect(yield* Effect.promise(() => refreshed.text())).toBe(\'{"version":2}\')',
+    'expect(await fs.readFile(fileURLToPath(pluginSpec as string), "utf8")).toContain("MarketplacePlugin")': 'expect(yield* Effect.promise(() => fs.readFile(fileURLToPath(pluginSpec as string), "utf8"))).toContain("MarketplacePlugin")',
+    'expect(await fs.readFile(path.join(skillItem!.path!, "SKILL.md"), "utf8")).toContain("Review the current diff")': 'expect(yield* Effect.promise(() => fs.readFile(path.join(skillItem!.path!, "SKILL.md"), "utf8"))).toContain("Review the current diff")',
+    'expect(await fs.readFile(materializedInstruction!, "utf8")).toContain("Always review")': 'expect(yield* Effect.promise(() => fs.readFile(materializedInstruction!, "utf8"))).toContain("Always review")',
 }
 for old, new in replacements.items():
     if old not in text:
