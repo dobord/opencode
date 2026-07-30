@@ -5,6 +5,10 @@ on:
     branches:
       - agent/marketplace-sqlite-api-cache
 
+concurrency:
+  group: marketplace-sqlite-api-cache
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -21,6 +25,8 @@ jobs:
           fetch-depth: 0
 
       - name: Apply implementation
+        id: apply
+        continue-on-error: true
         shell: bash
         run: |
           python3 - <<'PY'
@@ -40,15 +46,24 @@ jobs:
           rm .github/workflows/agent-marketplace-sqlite-api-cache-push.yml
 
       - name: Setup Bun and dependencies
+        id: setup
+        if: always() && steps.apply.outcome == 'success'
+        continue-on-error: true
         uses: ./.github/actions/setup-bun
 
       - name: Generate SQLite migration
+        id: migration
+        if: always() && steps.setup.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           cd packages/core
           bun run migration --name marketplace_registry
 
       - name: Generate SDKs
+        id: sdk
+        if: always() && steps.migration.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           cd packages/sdk/js
@@ -57,6 +72,9 @@ jobs:
           bun run generate
 
       - name: Format implementation
+        id: format
+        if: always() && steps.sdk.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           bun prettier --write \
@@ -89,12 +107,18 @@ jobs:
             packages/web/src/content/docs/ru/marketplace.mdx
 
       - name: Run Marketplace tests
+        id: tests
+        if: always() && steps.format.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           (cd packages/core && bun test test/marketplace.test.ts test/marketplace-profile.test.ts)
           (cd packages/opencode && bun test --timeout 30000 test/marketplace/*.test.ts test/config/config.test.ts test/server/httpapi-global.test.ts test/server/httpapi-control-plane.test.ts)
 
       - name: Typecheck affected packages
+        id: typecheck
+        if: always() && steps.tests.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           (cd packages/core && bun run typecheck)
@@ -105,6 +129,9 @@ jobs:
           (cd packages/app && bun run typecheck)
 
       - name: Validate Marketplace HTTP API
+        id: httpapi
+        if: always() && steps.typecheck.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           cd packages/opencode
@@ -113,17 +140,77 @@ jobs:
           bun run script/httpapi-exercise.ts --mode effect --fail-on-missing --fail-on-skip
 
       - name: Verify generated artifacts
+        id: verify
+        if: always() && steps.httpapi.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           (cd packages/core && bun run migration --check)
           (cd packages/client && bun run check:generated)
           git diff --check
 
-      - name: Commit implementation
+      - name: Publish implementation or validation report
+        if: always()
         shell: bash
+        env:
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+          SETUP_OUTCOME: ${{ steps.setup.outcome }}
+          MIGRATION_OUTCOME: ${{ steps.migration.outcome }}
+          SDK_OUTCOME: ${{ steps.sdk.outcome }}
+          FORMAT_OUTCOME: ${{ steps.format.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+          HTTPAPI_OUTCOME: ${{ steps.httpapi.outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: |
+          set -euo pipefail
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add -A
-          git commit -m "feat: add marketplace sqlite registry and API"
+
+          outcomes=(
+            "$APPLY_OUTCOME"
+            "$SETUP_OUTCOME"
+            "$MIGRATION_OUTCOME"
+            "$SDK_OUTCOME"
+            "$FORMAT_OUTCOME"
+            "$TESTS_OUTCOME"
+            "$TYPECHECK_OUTCOME"
+            "$HTTPAPI_OUTCOME"
+            "$VERIFY_OUTCOME"
+          )
+          success=true
+          for outcome in "${outcomes[@]}"; do
+            if [ "$outcome" != "success" ]; then
+              success=false
+            fi
+          done
+
+          if [ "$success" = true ]; then
+            git add -A
+            git commit -m "feat: add marketplace sqlite registry and API"
+            git push origin HEAD:agent/marketplace-sqlite-api-cache
+            exit 0
+          fi
+
+          git reset --hard HEAD
+          git clean -fd
+          mkdir -p .github/agent-marketplace-sqlite-api-cache
+          cat > .github/agent-marketplace-sqlite-api-cache/validation-failure.json <<JSON
+          {
+            "head": "${GITHUB_SHA}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "apply": "${APPLY_OUTCOME}",
+            "setup": "${SETUP_OUTCOME}",
+            "migration": "${MIGRATION_OUTCOME}",
+            "sdk": "${SDK_OUTCOME}",
+            "format": "${FORMAT_OUTCOME}",
+            "tests": "${TESTS_OUTCOME}",
+            "typecheck": "${TYPECHECK_OUTCOME}",
+            "httpapi": "${HTTPAPI_OUTCOME}",
+            "verify": "${VERIFY_OUTCOME}"
+          }
+          JSON
+          git add .github/agent-marketplace-sqlite-api-cache/validation-failure.json
+          git commit -m "ci: record marketplace validation failure"
           git push origin HEAD:agent/marketplace-sqlite-api-cache
+          exit 1
