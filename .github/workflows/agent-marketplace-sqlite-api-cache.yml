@@ -1,0 +1,114 @@
+name: Apply Marketplace SQLite, CAS, and API
+
+on:
+  push:
+    branches:
+      - agent/marketplace-sqlite-api-cache
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: agent/marketplace-sqlite-api-cache
+          fetch-depth: 0
+
+      - name: Apply implementation
+        shell: bash
+        run: |
+          python3 .github/agent-marketplace-sqlite-api-cache/apply.py
+          rm -rf .github/agent-marketplace-sqlite-api-cache
+          rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
+
+      - name: Setup Bun and dependencies
+        uses: ./.github/actions/setup-bun
+
+      - name: Generate SQLite migration
+        shell: bash
+        run: |
+          cd packages/core
+          bun run migration --name marketplace_registry
+
+      - name: Generate SDKs
+        shell: bash
+        run: |
+          cd packages/sdk/js
+          bun run build
+          cd ../../client
+          bun run generate
+
+      - name: Format implementation
+        shell: bash
+        run: |
+          bun prettier --write \
+            packages/core/src/marketplace.ts \
+            packages/core/src/marketplace-schema.ts \
+            packages/core/src/marketplace-profile.ts \
+            packages/core/src/marketplace/sql.ts \
+            packages/core/src/v1/config/config.ts \
+            packages/opencode/src/marketplace/registry.ts \
+            packages/opencode/src/marketplace/cache.ts \
+            packages/opencode/src/marketplace/service.ts \
+            packages/opencode/src/marketplace/overlay.ts \
+            packages/opencode/src/config/config.ts \
+            packages/opencode/src/effect/app-runtime.ts \
+            packages/opencode/src/server/routes/instance/httpapi/api.ts \
+            packages/opencode/src/server/routes/instance/httpapi/server.ts \
+            packages/opencode/src/server/routes/instance/httpapi/groups/marketplace.ts \
+            packages/opencode/src/server/routes/instance/httpapi/handlers/marketplace.ts \
+            packages/opencode/src/cli/cmd/plug.ts \
+            packages/opencode/test/marketplace/registry.test.ts \
+            packages/opencode/test/marketplace/cache.test.ts \
+            packages/opencode/test/config/config.test.ts \
+            packages/app/src/components/marketplace-dialog.tsx \
+            packages/app/src/context/server-sync.tsx \
+            packages/tui/src/feature-plugins/system/marketplace.tsx \
+            packages/web/src/content/docs/marketplace.mdx \
+            packages/web/src/content/docs/ru/marketplace.mdx
+
+      - name: Run Marketplace tests
+        shell: bash
+        run: |
+          (cd packages/core && bun test test/marketplace.test.ts test/marketplace-profile.test.ts)
+          (cd packages/opencode && bun test --timeout 30000 test/marketplace/*.test.ts test/config/config.test.ts)
+
+      - name: Typecheck affected packages
+        shell: bash
+        run: |
+          (cd packages/core && bun run typecheck)
+          (cd packages/opencode && bun run typecheck)
+          (cd packages/sdk/js && bun run typecheck)
+          (cd packages/client && bun run typecheck)
+          (cd packages/tui && bun run typecheck)
+          (cd packages/app && bun run typecheck)
+
+      - name: Validate Marketplace HTTP API
+        shell: bash
+        run: |
+          cd packages/opencode
+          bun run script/httpapi-exercise.ts --mode coverage --fail-on-missing --fail-on-skip
+          bun run script/httpapi-exercise.ts --mode auth --fail-on-missing --fail-on-skip
+          bun run script/httpapi-exercise.ts --mode effect --fail-on-missing --fail-on-skip
+
+      - name: Verify generated artifacts
+        shell: bash
+        run: |
+          (cd packages/core && bun run migration --check)
+          (cd packages/client && bun run check:generated)
+          git diff --check
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add -A
+          git commit -m "feat: add marketplace sqlite registry and API"
+          git push origin HEAD:agent/marketplace-sqlite-api-cache
