@@ -10,6 +10,7 @@ export type MarketplaceSource = {
   id: string
   name: string
   url: string
+  reference?: string
   enabled?: boolean
   trust?: MarketplaceTrust
   headers?: Record<string, string>
@@ -125,14 +126,20 @@ export type MarketplaceInstalled = {
   updated_at: string
   snapshot?: MarketplaceInstalledSnapshot
   plan: MarketplaceInstallPlan
+  materialized_plan?: MarketplaceInstallPlan
   active_plan?: MarketplaceInstallPlan
   receipt: MarketplaceReceipt
   enabled?: boolean
   disabled_skills?: string[]
   disabled_mcp?: string[]
+  catalog_digest?: string
+  manifest_digest?: string
+  materialized_digest?: string
+  artifact_digests?: string[]
 }
 
 export type MarketplaceState = {
+  revision?: number
   sources?: MarketplaceSource[]
   installed?: Record<string, MarketplaceInstalled>
 }
@@ -158,6 +165,8 @@ export type MarketplaceListing = {
   catalog: MarketplaceCatalog
   item: MarketplaceCatalogItem
   orphaned?: boolean
+  catalog_url?: string
+  catalog_digest?: string
 }
 
 export type MarketplaceLoadError = {
@@ -169,6 +178,53 @@ export type MarketplaceLoadResult = {
   listings: MarketplaceListing[]
   errors: MarketplaceLoadError[]
 }
+
+export type MarketplaceCacheSummary = {
+  root: string
+  objects: number
+  total_bytes: number
+  fetch_entries: number
+  materializations: number
+}
+
+export type MarketplaceView = {
+  state: MarketplaceState
+  listings: MarketplaceListing[]
+  errors: MarketplaceLoadError[]
+  cache: MarketplaceCacheSummary
+}
+
+export type MarketplacePlanResult =
+  | {
+      ok: true
+      key: string
+      action: "install" | "update"
+      trust_warning: boolean
+      conflicts: MarketplaceConflict[]
+      permissions: string[]
+      summary: string
+    }
+  | {
+      ok: false
+      reason: "not_found" | "materialization"
+      message: string
+    }
+
+export type MarketplaceMutationResult =
+  | {
+      ok: true
+      changed: boolean
+      view: MarketplaceView
+      connect_mcp: string[]
+      preserved: string[]
+    }
+  | {
+      ok: false
+      reason: "conflict" | "revision" | "trust" | "not_found" | "materialization"
+      message: string
+      revision?: number
+      conflicts?: MarketplaceConflict[]
+    }
 
 export type MarketplaceConflict = {
   path: string
@@ -266,6 +322,7 @@ export function createMarketplaceSource(input: {
     id: `source-${hash(url)}`,
     name: input.name?.trim() || host || "Marketplace catalog",
     url,
+    reference: input.url.trim(),
     enabled: true,
     trust: configuredTrust(input.trust),
     ...(input.headers ? { headers: input.headers } : {}),
@@ -313,11 +370,15 @@ export async function loadMarketplace(input: {
       .filter((source) => source.enabled !== false)
       .map(async (source) => {
         try {
-          const catalog =
+          const loaded =
             source.url === OFFICIAL_MARKETPLACE_SOURCE.url
-              ? OFFICIAL_MARKETPLACE_CATALOG
+              ? {
+                  catalog: OFFICIAL_MARKETPLACE_CATALOG,
+                  url: OFFICIAL_MARKETPLACE_SOURCE.url,
+                  digest: undefined,
+                }
               : await fetchMarketplaceCatalog(fetcher, source, input.timeout ?? 10_000)
-          return { ok: true as const, source, catalog }
+          return { ok: true as const, source, ...loaded }
         } catch (error) {
           return { ok: false as const, source, error: error instanceof Error ? error.message : String(error) }
         }
@@ -331,12 +392,14 @@ export async function loadMarketplace(input: {
       source: row.source,
       catalog: row.catalog,
       item,
+      catalog_url: row.url,
+      ...(row.digest ? { catalog_digest: row.digest } : {}),
     }))
   })
 
-  // Installation receipts must remain manageable even when a catalog is
-  // disabled, removed, unavailable, or withdraws an item. Synthesize a local
-  // listing from the receipt so Installed can still show and uninstall it.
+  // Installation records remain manageable even when a catalog is disabled,
+  // removed, unavailable, or withdraws an item. Synthesize a local listing
+  // from the SQLite registry snapshot.
   const known = new Set(listings.map((listing) => listing.key))
   const sources = marketplaceSources(input.config)
   for (const [key, installed] of Object.entries(input.config.marketplace?.installed ?? {})) {
@@ -370,6 +433,8 @@ export async function loadMarketplace(input: {
       },
       item,
       orphaned: true,
+      ...(installed.source_url ? { catalog_url: installed.source_url } : {}),
+      ...(installed.catalog_digest ? { catalog_digest: installed.catalog_digest } : {}),
     })
   }
 
@@ -385,17 +450,16 @@ export async function loadMarketplace(input: {
 }
 
 async function fetchMarketplaceCatalog(fetcher: MarketplaceFetch, source: MarketplaceSource, timeout: number) {
-  const load = async (url: string) =>
-    resolveCatalogIcons(
-      parseMarketplaceCatalog(
-        await fetcher(url, {
-          headers: source.headers,
-          cache: "no-store",
-          signal: AbortSignal.timeout(timeout),
-        }).then(readCatalogResponse),
-      ),
-      url,
-    )
+  const load = async (url: string) => {
+    const response = await fetcher(url, {
+      headers: source.headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeout),
+    })
+    const digest = response.headers.get("x-opencode-artifact-digest") ?? undefined
+    const catalog = resolveCatalogIcons(parseMarketplaceCatalog(await readCatalogResponse(response)), url)
+    return { catalog, url, digest }
+  }
   const urls = marketplaceCatalogURLs(source.url)
   if (urls.length === 1) return load(urls[0]!)
   return Promise.any(urls.map(load))
@@ -433,7 +497,7 @@ export function marketplaceStatus(config: MarketplaceHostConfig, listing: Market
   const installed = config.marketplace?.installed?.[listing.key]
   if (!installed) return "available"
   if (listing.orphaned) return "installed"
-  const changed = installed.fingerprint !== fingerprint(listing.item)
+  const changed = installed.fingerprint !== marketplaceFingerprint(listing.item)
   if (semver.valid(installed.version) && semver.valid(listing.item.version)) {
     if (semver.gt(listing.item.version, installed.version)) return "update"
     // A catalog must never turn Update All into an implicit downgrade. A lower
@@ -457,7 +521,7 @@ export function installMarketplaceItem(
   )
   const disabledMcp =
     current?.disabled_mcp?.filter((id) => id in (listing.item.install.mcp ?? {})) ??
-    initialDisabledMcp(listing.item.install)
+    marketplaceInitialDisabledMcp(listing.item.install)
   const enabled = current?.enabled !== false
   const state = {
     ...current,
@@ -489,7 +553,7 @@ export function installMarketplaceItem(
         kind: listing.item.kind,
         version: listing.item.version,
         publisher: listing.item.publisher?.name ?? listing.catalog.publisher?.name,
-        fingerprint: fingerprint(listing.item),
+        fingerprint: marketplaceFingerprint(listing.item),
         installed_at: current?.installed_at ?? now,
         updated_at: now,
         snapshot: marketplaceSnapshot(listing.item),
@@ -663,7 +727,7 @@ function reconfigureMarketplaceItem(
   return { ok: true, config: removed.config, conflicts: [], preserved: removed.preserved }
 }
 
-function marketplaceActivePlan(
+export function marketplaceActivePlan(
   plan: MarketplaceInstallPlan,
   state: Pick<MarketplaceInstalled, "enabled" | "disabled_skills" | "disabled_mcp">,
 ): MarketplaceInstallPlan {
@@ -719,7 +783,7 @@ function installedActivePlan(installed: MarketplaceInstalled) {
   return installed.plan
 }
 
-function initialDisabledMcp(plan: MarketplaceInstallPlan) {
+export function marketplaceInitialDisabledMcp(plan: MarketplaceInstallPlan) {
   return Object.entries(plan.mcp ?? {})
     .filter(([, value]) => value.enabled === false || value.disabled === true)
     .map(([id]) => id)
@@ -1251,7 +1315,7 @@ function marketplaceKey(source: string, catalog: string, item: string) {
   return `${source}:${catalog}:${item}`
 }
 
-function fingerprint(item: MarketplaceCatalogItem) {
+export function marketplaceFingerprint(item: MarketplaceCatalogItem) {
   return hash(stable(item))
 }
 
@@ -1350,7 +1414,7 @@ function color(value: unknown, label: string) {
   return result.toUpperCase()
 }
 
-function marketplaceSnapshot(item: MarketplaceCatalogItem): MarketplaceInstalledSnapshot {
+export function marketplaceSnapshot(item: MarketplaceCatalogItem): MarketplaceInstalledSnapshot {
   const { install: _, ...snapshot } = item
   return clone(snapshot)
 }

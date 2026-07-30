@@ -1,0 +1,203 @@
+export * as MarketplaceSchema from "./marketplace-schema"
+
+import { Schema } from "effect"
+import { NonNegativeInt } from "./schema"
+
+export const Trust = Schema.Literals(["official", "verified", "community", "private"])
+export const ConfiguredTrust = Schema.Literals(["community", "private"])
+export const Kind = Schema.Literals(["plugin", "skill", "agent", "command", "mcp", "bundle"])
+
+export const Source = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  url: Schema.String,
+  reference: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+  trust: Schema.optional(Trust),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+}).annotate({ identifier: "MarketplaceSource" })
+
+export const Installed = Schema.Struct({
+  source: Schema.String,
+  source_url: Schema.optional(Schema.String),
+  source_trust: Schema.optional(Trust),
+  catalog: Schema.String,
+  catalog_name: Schema.optional(Schema.String),
+  item: Schema.String,
+  name: Schema.String,
+  kind: Kind,
+  version: Schema.String,
+  publisher: Schema.optional(Schema.String),
+  fingerprint: Schema.String,
+  installed_at: Schema.String,
+  updated_at: Schema.String,
+  snapshot: Schema.optional(Schema.Unknown),
+  plan: Schema.Unknown,
+  materialized_plan: Schema.optional(Schema.Unknown),
+  active_plan: Schema.optional(Schema.Unknown),
+  receipt: Schema.Unknown,
+  enabled: Schema.optional(Schema.Boolean),
+  disabled_skills: Schema.optional(Schema.Array(Schema.String)),
+  disabled_mcp: Schema.optional(Schema.Array(Schema.String)),
+  catalog_digest: Schema.optional(Schema.String),
+  manifest_digest: Schema.optional(Schema.String),
+  materialized_digest: Schema.optional(Schema.String),
+  artifact_digests: Schema.optional(Schema.Array(Schema.String)),
+}).annotate({ identifier: "MarketplaceInstalled" })
+
+export const State = Schema.Struct({
+  revision: Schema.optional(NonNegativeInt),
+  sources: Schema.optional(Schema.Array(Source)),
+  installed: Schema.optional(Schema.Record(Schema.String, Installed)),
+}).annotate({ identifier: "MarketplaceState" })
+
+export const Listing = Schema.Struct({
+  key: Schema.String,
+  source: Source,
+  catalog: Schema.Unknown,
+  item: Schema.Unknown,
+  orphaned: Schema.optional(Schema.Boolean),
+  catalog_url: Schema.optional(Schema.String),
+  catalog_digest: Schema.optional(Schema.String),
+}).annotate({ identifier: "MarketplaceListing" })
+
+export const LoadError = Schema.Struct({
+  source: Source,
+  message: Schema.String,
+}).annotate({ identifier: "MarketplaceLoadError" })
+
+export const CacheSummary = Schema.Struct({
+  root: Schema.String,
+  objects: NonNegativeInt,
+  total_bytes: NonNegativeInt,
+  fetch_entries: NonNegativeInt,
+  materializations: NonNegativeInt,
+}).annotate({ identifier: "MarketplaceCacheSummary" })
+
+export const View = Schema.Struct({
+  state: State,
+  listings: Schema.Array(Listing),
+  errors: Schema.Array(LoadError),
+  cache: CacheSummary,
+}).annotate({ identifier: "MarketplaceView" })
+
+export const Conflict = Schema.Struct({
+  path: Schema.String,
+  current: Schema.Unknown,
+  incoming: Schema.Unknown,
+}).annotate({ identifier: "MarketplaceConflict" })
+
+export const PlanInput = Schema.Struct({
+  key: Schema.String,
+}).annotate({ identifier: "MarketplacePlanInput" })
+
+export const PlanResult = Schema.Union([
+  Schema.Struct({
+    ok: Schema.Literal(true),
+    key: Schema.String,
+    action: Schema.Literals(["install", "update"]),
+    trust_warning: Schema.Boolean,
+    conflicts: Schema.Array(Conflict),
+    permissions: Schema.Array(Schema.String),
+    summary: Schema.String,
+  }),
+  Schema.Struct({
+    ok: Schema.Literal(false),
+    reason: Schema.Literals(["not_found", "materialization"]),
+    message: Schema.String,
+  }),
+]).annotate({ identifier: "MarketplacePlanResult" })
+
+export const InstallInput = Schema.Struct({
+  key: Schema.String,
+  expected_revision: NonNegativeInt,
+  force: Schema.optional(Schema.Boolean),
+  accept_untrusted: Schema.optional(Schema.Boolean),
+}).annotate({ identifier: "MarketplaceInstallInput" })
+
+export const UpdateAllInput = Schema.Struct({
+  expected_revision: NonNegativeInt,
+  force: Schema.optional(Schema.Boolean),
+  accept_untrusted: Schema.optional(Schema.Boolean),
+}).annotate({ identifier: "MarketplaceUpdateAllInput" })
+
+export const RevisionInput = Schema.Struct({
+  expected_revision: NonNegativeInt,
+}).annotate({ identifier: "MarketplaceRevisionInput" })
+
+export const ToggleInput = Schema.Struct({
+  expected_revision: NonNegativeInt,
+  component: Schema.Literals(["package", "skill", "mcp"]),
+  id: Schema.optional(Schema.String),
+  enabled: Schema.Boolean,
+}).annotate({ identifier: "MarketplaceToggleInput" })
+
+export const SourceAddInput = Schema.Struct({
+  expected_revision: NonNegativeInt,
+  url: Schema.String,
+  name: Schema.optional(Schema.String),
+  trust: Schema.optional(ConfiguredTrust),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+}).annotate({ identifier: "MarketplaceSourceAddInput" })
+
+export const SourceToggleInput = Schema.Struct({
+  expected_revision: NonNegativeInt,
+  enabled: Schema.Boolean,
+}).annotate({ identifier: "MarketplaceSourceToggleInput" })
+
+export const ProfileExportInput = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+}).annotate({ identifier: "MarketplaceProfileExportInput" })
+
+export const CachePruneInput = Schema.Struct({
+  max_age_days: Schema.optional(NonNegativeInt),
+}).annotate({ identifier: "MarketplaceCachePruneInput" })
+
+export const MutationResult = Schema.Union([
+  Schema.Struct({
+    ok: Schema.Literal(true),
+    changed: Schema.Boolean,
+    view: View,
+    connect_mcp: Schema.Array(Schema.String),
+    preserved: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({
+    ok: Schema.Literal(false),
+    reason: Schema.Literals(["conflict", "revision", "trust", "not_found", "materialization"]),
+    message: Schema.String,
+    revision: Schema.optional(NonNegativeInt),
+    conflicts: Schema.optional(Schema.Array(Conflict)),
+  }),
+]).annotate({ identifier: "MarketplaceMutationResult" })
+
+const ProfileSource = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  url: Schema.String,
+  trust: Schema.optional(Trust),
+})
+
+const ProfilePackage = Schema.Struct({
+  key: Schema.String,
+  source: Schema.String,
+  catalog: Schema.String,
+  item: Schema.String,
+  name: Schema.String,
+  kind: Schema.String,
+  version: Schema.String,
+  enabled: Schema.Boolean,
+  components: Schema.Struct({
+    skills: Schema.Record(Schema.String, Schema.Boolean),
+    mcp: Schema.Record(Schema.String, Schema.Boolean),
+  }),
+})
+
+export const Profile = Schema.Struct({
+  schema: Schema.Literal("opencode.marketplace.profile/v1"),
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+  generated_at: Schema.String,
+  sources: Schema.Array(ProfileSource),
+  packages: Schema.Array(ProfilePackage),
+}).annotate({ identifier: "MarketplaceProfile" })

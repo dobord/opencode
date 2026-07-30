@@ -38,6 +38,7 @@ export const Installed = Schema.Struct({
 })
 
 export const Info = Schema.Struct({
+  revision: Schema.optional(Schema.Number),
   sources: Schema.optional(Schema.mutable(Schema.Array(Source))),
   installed: Schema.optional(Schema.Record(Schema.String, Installed)),
 })
