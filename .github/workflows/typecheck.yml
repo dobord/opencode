@@ -50,6 +50,7 @@ jobs:
           PY
           python3 .github/agent-marketplace-sqlite-api-cache/apply.py
           python3 .github/agent-marketplace-sqlite-api-cache/post_apply.py
+          python3 .github/agent-marketplace-sqlite-api-cache/finalize.py
           python3 - <<'PY'
           from pathlib import Path
           workflow = Path('.github/workflows/typecheck.yml')
@@ -64,8 +65,8 @@ jobs:
           workflow.write_text(text)
           PY
           rm -rf .github/agent-marketplace-sqlite-api-cache
-          rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
-          rm .github/workflows/agent-marketplace-sqlite-api-cache-push.yml
+          rm -f .github/workflows/agent-marketplace-sqlite-api-cache.yml
+          rm -f .github/workflows/agent-marketplace-sqlite-api-cache-push.yml
 
       - name: Setup Bun and dependencies
         id: setup
@@ -122,6 +123,7 @@ jobs:
             packages/opencode/test/config/config.test.ts \
             packages/opencode/test/server/httpapi-global.test.ts \
             packages/opencode/test/server/httpapi-control-plane.test.ts \
+            packages/opencode/test/server/httpapi-exercise/index.ts \
             packages/app/src/components/marketplace-dialog.tsx \
             packages/app/src/context/server-sync.tsx \
             packages/tui/src/feature-plugins/system/marketplace.tsx \
