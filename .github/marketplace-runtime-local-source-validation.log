@@ -1,5 +1,7 @@
 ## Apply implementation
-  File "/home/runner/work/opencode/opencode/.github/scripts/fix-marketplace-runtime-local-source-bootstrap.py", line 52
-    '''  const urls = marketplaceCatalogURLs(source.url)
-         ^^^^^
-SyntaxError: invalid syntax
+Traceback (most recent call last):
+  File "/home/runner/work/opencode/opencode/.github/scripts/apply-marketplace-runtime-local-source.py", line 1348, in <module>
+    replace(
+  File "/home/runner/work/opencode/opencode/.github/scripts/apply-marketplace-runtime-local-source.py", line 22, in replace
+    raise RuntimeError(f"{path}: expected {count} occurrences, found {actual}: {old[:120]!r}")
+RuntimeError: packages/core/src/marketplace.ts: expected 1 occurrences, found 0: '  const pathname = value.split(/[?#]/)[0] ?? value\n  if (value.includes("\\\\") || pathname.split("/").includes("..")) {\n '
