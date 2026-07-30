@@ -41,6 +41,9 @@ jobs:
             packages/web/src/content/docs/marketplace.mdx \
             packages/web/src/content/docs/ru/marketplace.mdx
 
+      - name: Build documentation site
+        run: bun --cwd packages/web build
+
       - name: Regenerate CLI help snapshots
         working-directory: packages/opencode
         run: bun test -u --timeout 180000 test/cli/help/help-snapshots.test.ts
