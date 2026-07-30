@@ -1,14 +1,13 @@
 {
-  "head": "63c3e1c058db3a33a93bbab68d90f17ccd731651",
-  "run_id": "30517484716",
+  "head": "f0e8b235852e15256b0b7bc9f45d3fb0214691ad",
+  "run_id": "30519158372",
   "apply": "success",
   "setup": "success",
   "migration": "success",
   "sdk": "success",
   "format": "success",
   "tests": "success",
-  "typecheck": "success",
-  "httpapi": "retry",
-  "verify": "retry",
-  "retry_reason": "trigger full push validation from a non-bot commit"
+  "typecheck": "failure",
+  "httpapi": "skipped",
+  "verify": "skipped"
 }
