@@ -39,6 +39,8 @@ must_replace(
 
 # Every public Marketplace operation needs an exerciser scenario so coverage,
 # authorization, and Effect-runtime modes validate the dedicated API surface.
+# The source scenario uses the built-in catalog URL to stay fully offline and
+# avoid leaving network sockets alive in the long-running Effect exerciser.
 marketplace_scenarios = '''  http.protected.get("/marketplace", "marketplace.get").global().json(200, object, "status"),
   http.protected.post("/marketplace/refresh", "marketplace.refresh").global().json(200, object, "status"),
   http.protected
@@ -84,7 +86,7 @@ marketplace_scenarios = '''  http.protected.get("/marketplace", "marketplace.get
       path: "/marketplace/source",
       body: {
         expected_revision: 0,
-        url: "http://localhost:1/catalog.json",
+        url: "builtin://opencode",
         name: "HTTP API Marketplace",
         trust: "community",
       },
