@@ -68,11 +68,13 @@ replace(
   return Promise.any(urls.map(load))''',
 )
 
-# Reject percent-encoded traversal as well as literal ../ segments.
+# Reject percent-encoded traversal as well as literal ../ segments. The first
+# string matches the one-backslash text emitted by the original bootstrap;
+# the replacement writes a valid two-backslash JavaScript string literal.
 replace(
     "packages/core/src/marketplace.ts",
     '''  const pathname = value.split(/[?#]/)[0] ?? value
-  if (value.includes("\\\\") || pathname.split("/").includes("..")) {
+  if (value.includes("\\") || pathname.split("/").includes("..")) {
     throw new Error(`${label} must stay inside the catalog directory`)
   }
   const relative = directory && !pathname.endsWith("/") ? `${pathname}/${value.slice(pathname.length)}` : value''',
