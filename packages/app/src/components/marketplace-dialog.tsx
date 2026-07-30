@@ -18,12 +18,16 @@ import {
   type MarketplaceView,
 } from "@opencode-ai/core/marketplace"
 import { Dialog } from "@opencode-ai/ui/dialog"
-import { Switch } from "@opencode-ai/ui/switch"
+import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
+import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
+import { Switch } from "@opencode-ai/ui/v2/switch-v2"
+import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import "./marketplace-dialog.css"
 
 const TABS = ["discover", "installed", "updates", "sources"] as const
 const KINDS = ["all", "plugin", "skill", "agent", "command", "mcp", "bundle"] as const
@@ -265,15 +269,17 @@ export function MarketplacePanel() {
   }
 
   return (
-    <div class="relative flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3">
-      <div class="flex flex-wrap items-start justify-between gap-3">
+    <div data-component="marketplace-panel" class="relative flex h-full min-h-0 flex-col overflow-hidden">
+      <div data-slot="marketplace-header" class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 class="text-16-medium text-text-strong">Marketplace</h2>
-          <p class="mt-1 text-12-regular text-text-weak">
+          <h2 data-slot="marketplace-title" class="text-16-medium text-text-strong">
+            Marketplace
+          </h2>
+          <p data-slot="marketplace-subtitle" class="mt-1 text-12-regular text-text-weak">
             SQLite registry · content-addressed cache · revision {revision()}
           </p>
         </div>
-        <div class="flex flex-wrap items-center gap-2 text-12-regular text-text-weak">
+        <div data-slot="marketplace-toolbar" class="flex flex-wrap items-center gap-2 text-12-regular text-text-weak">
           <span>{Object.keys(state().installed ?? {}).length} installed</span>
           <Show when={view()?.cache}>
             {(cache) => (
@@ -283,49 +289,39 @@ export function MarketplacePanel() {
             )}
           </Show>
           <Show when={updates().length}>
-            <button
+            <ButtonV2
               type="button"
+              size="small"
+              variant="neutral"
               disabled={store.busy}
-              class="rounded-md bg-surface-raised-base px-2 py-1 text-text-strong hover:bg-surface-raised-base-hover disabled:opacity-50"
               onClick={() => void updateAll()}
             >
               Update all ({updates().length})
-            </button>
+            </ButtonV2>
           </Show>
-          <button
-            type="button"
-            disabled={store.busy}
-            class="rounded-md border border-border-base px-2 py-1 text-text-base hover:bg-surface-raised-base-hover disabled:opacity-50"
-            onClick={() => void prune()}
-          >
+          <ButtonV2 type="button" size="small" variant="outline" disabled={store.busy} onClick={() => void prune()}>
             Prune cache
-          </button>
-          <button
-            type="button"
-            disabled={store.busy}
-            class="rounded-md border border-border-base px-2 py-1 text-text-base hover:bg-surface-raised-base-hover disabled:opacity-50"
-            onClick={() => void refresh()}
-          >
+          </ButtonV2>
+          <ButtonV2 type="button" size="small" variant="outline" disabled={store.busy} onClick={() => void refresh()}>
             Refresh
-          </button>
+          </ButtonV2>
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-1 border-b border-border-weak pb-2">
+      <div data-slot="marketplace-tabs" class="flex flex-wrap items-center gap-1 border-b pb-2">
         <For each={TABS}>
           {(tab) => (
-            <button
+            <ButtonV2
               type="button"
-              class="rounded-md px-2.5 py-1.5 text-12-medium capitalize"
-              classList={{
-                "bg-surface-raised-base text-text-strong": store.tab === tab,
-                "text-text-weak hover:text-text-base": store.tab !== tab,
-              }}
+              size="small"
+              variant={store.tab === tab ? "neutral" : "ghost-muted"}
+              class="capitalize"
+              aria-current={store.tab === tab ? "page" : undefined}
               onClick={() => setStore("tab", tab)}
             >
               {tab}
               <Show when={tab === "updates" && updates().length}> ({updates().length})</Show>
-            </button>
+            </ButtonV2>
           )}
         </For>
       </div>
@@ -333,23 +329,29 @@ export function MarketplacePanel() {
       <Show
         when={store.tab === "sources"}
         fallback={
-          <div class="flex min-h-0 flex-1 gap-3 overflow-hidden">
-            <div class="flex min-h-0 w-[42%] min-w-72 flex-col overflow-hidden rounded-lg border border-border-weak bg-surface-base">
-              <div class="flex gap-2 border-b border-border-weak p-2">
-                <input
+          <div data-slot="marketplace-content" class="flex min-h-0 flex-1 gap-3 overflow-hidden">
+            <div data-slot="marketplace-pane" class="flex min-h-0 w-[42%] min-w-72 flex-col overflow-hidden rounded-lg">
+              <div data-slot="marketplace-filters" class="flex gap-2 border-b p-2">
+                <TextInputV2
                   autofocus
+                  type="search"
+                  appearance="base"
                   value={store.query}
                   onInput={(event) => setStore("query", event.currentTarget.value)}
                   placeholder="Search marketplace"
-                  class="min-w-0 flex-1 rounded-md border border-border-base bg-background-base px-2.5 py-1.5 text-13-regular text-text-strong outline-none focus:border-border-strong"
+                  spellcheck={false}
+                  autocorrect="off"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  aria-label="Search marketplace"
                 />
-                <select
-                  value={store.kind}
-                  onChange={(event) => setStore("kind", event.currentTarget.value as KindFilter)}
-                  class="rounded-md border border-border-base bg-background-base px-2 text-12-regular text-text-base"
-                >
-                  <For each={KINDS}>{(kind) => <option value={kind}>{kind}</option>}</For>
-                </select>
+                <SelectV2
+                  options={[...KINDS]}
+                  current={store.kind}
+                  appearance="base"
+                  aria-label="Marketplace item type"
+                  onSelect={(value) => value && setStore("kind", value)}
+                />
               </div>
               <div class="min-h-0 flex-1 overflow-y-auto p-1.5">
                 <Show
@@ -364,8 +366,9 @@ export function MarketplacePanel() {
                       {(listing) => (
                         <button
                           type="button"
-                          class="mb-1 flex w-full gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-surface-raised-base-hover"
-                          classList={{ "bg-surface-raised-base": current()?.key === listing.key }}
+                          data-slot="marketplace-list-item"
+                          data-selected={current()?.key === listing.key ? "" : undefined}
+                          class="mb-1 flex w-full gap-2.5 rounded-md px-2.5 py-2 text-left"
                           onClick={() => setStore("selected", listing.key)}
                         >
                           <PluginIcon listing={listing} />
@@ -390,7 +393,7 @@ export function MarketplacePanel() {
                 </Show>
               </div>
             </div>
-            <div class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-lg border border-border-weak bg-surface-base p-4">
+            <div data-slot="marketplace-pane" class="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-lg p-4">
               <Show
                 when={current()}
                 fallback={
@@ -459,8 +462,11 @@ export function MarketplacePanel() {
 
       <Show when={store.pending}>
         {(pending) => (
-          <div class="absolute inset-0 z-10 flex items-center justify-center bg-background-base/80 p-4">
-            <div class="w-full max-w-lg rounded-xl border border-border-base bg-surface-base p-4 shadow-lg">
+          <div
+            data-slot="marketplace-modal-backdrop"
+            class="absolute inset-0 z-10 flex items-center justify-center p-4"
+          >
+            <div data-slot="marketplace-modal" class="w-full max-w-lg rounded-xl p-4">
               <h3 class="text-15-medium text-text-strong capitalize">
                 {pending().action} {pending().listing.item.name}
               </h3>
@@ -492,21 +498,17 @@ export function MarketplacePanel() {
                 </div>
               </Show>
               <div class="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  class="rounded-md px-3 py-1.5 text-12-medium text-text-base hover:bg-surface-raised-base-hover"
-                  onClick={() => setStore("pending", undefined)}
-                >
+                <ButtonV2 type="button" variant="ghost-muted" onClick={() => setStore("pending", undefined)}>
                   Cancel
-                </button>
-                <button
+                </ButtonV2>
+                <ButtonV2
                   type="button"
+                  variant={pending().action === "uninstall" ? "danger" : "neutral"}
                   disabled={store.busy}
-                  class="rounded-md bg-surface-raised-base px-3 py-1.5 text-12-medium text-text-strong hover:bg-surface-raised-base-hover disabled:opacity-50"
                   onClick={() => void confirm()}
                 >
                   Confirm
-                </button>
+                </ButtonV2>
               </div>
             </div>
           </div>
@@ -518,7 +520,9 @@ export function MarketplacePanel() {
 
 function Status(props: { value: ReturnType<typeof marketplaceStatus> }) {
   return (
-    <span class="shrink-0 rounded bg-surface-raised-base px-1.5 py-0.5 text-10-medium uppercase">{props.value}</span>
+    <span data-slot="marketplace-status" class="shrink-0 rounded px-1.5 py-0.5 text-10-medium uppercase">
+      {props.value}
+    </span>
   )
 }
 
@@ -578,18 +582,19 @@ function Details(props: {
             {props.listing.item.version} · {props.listing.source.name}
           </div>
         </div>
-        <button
+        <ButtonV2
           type="button"
+          variant={status() === "installed" ? "danger" : "neutral"}
           disabled={props.busy}
-          class="shrink-0 rounded-md bg-surface-raised-base px-3 py-1.5 text-12-medium text-text-strong hover:bg-surface-raised-base-hover disabled:opacity-50"
+          class="shrink-0"
           onClick={props.action}
         >
           {status() === "available" ? "Install" : status() === "update" ? "Update" : "Uninstall"}
-        </button>
+        </ButtonV2>
       </div>
       <p class="mt-4 whitespace-pre-wrap text-13-regular leading-5 text-text-base">{props.listing.item.description}</p>
       <Show when={installed()}>
-        <div class="mt-5 rounded-lg border border-border-weak">
+        <div data-slot="marketplace-component-list" class="mt-5 rounded-lg">
           <ToggleRow
             title={language.t("marketplace.component.plugin.title")}
             description={language.t("marketplace.component.plugin.description")}
@@ -690,43 +695,43 @@ function Sources(props: {
   remove: (source: MarketplaceSource) => void
 }) {
   return (
-    <div class="min-h-0 flex-1 overflow-y-auto">
-      <div class="grid gap-2 rounded-lg border border-border-weak bg-surface-base p-3 md:grid-cols-[1fr_13rem_9rem_auto]">
-        <input
+    <div data-slot="marketplace-content" class="min-h-0 flex-1 overflow-y-auto">
+      <div data-slot="marketplace-source-form" class="grid gap-2 rounded-lg p-3 md:grid-cols-[1fr_13rem_9rem_auto]">
+        <TextInputV2
+          appearance="base"
           value={props.sourceURL}
           onInput={(event) => props.setURL(event.currentTarget.value)}
           placeholder="https://… or github:owner/repository"
-          class="rounded-md border border-border-base bg-background-base px-2.5 py-1.5 text-13-regular text-text-strong"
+          aria-label="Marketplace source URL"
+          spellcheck={false}
+          autocorrect="off"
+          autocomplete="off"
+          autocapitalize="off"
         />
-        <input
+        <TextInputV2
+          appearance="base"
           value={props.sourceName}
           onInput={(event) => props.setName(event.currentTarget.value)}
           placeholder="Display name"
-          class="rounded-md border border-border-base bg-background-base px-2.5 py-1.5 text-13-regular text-text-strong"
+          aria-label="Marketplace source display name"
         />
-        <select
-          value={props.sourceTrust}
-          onChange={(event) => props.setTrust(event.currentTarget.value as MarketplaceConfiguredTrust)}
-          class="rounded-md border border-border-base bg-background-base px-2.5 py-1.5 text-13-regular text-text-strong"
-        >
-          <option value="community">community</option>
-          <option value="private">private</option>
-        </select>
-        <button
-          type="button"
-          disabled={props.busy || !props.sourceURL.trim()}
-          class="rounded-md bg-surface-raised-base px-3 py-1.5 text-12-medium text-text-strong disabled:opacity-50"
-          onClick={props.add}
-        >
+        <SelectV2
+          options={["community", "private"] as MarketplaceConfiguredTrust[]}
+          current={props.sourceTrust}
+          appearance="base"
+          aria-label="Marketplace source trust"
+          onSelect={(value) => value && props.setTrust(value)}
+        />
+        <ButtonV2 type="button" variant="neutral" disabled={props.busy || !props.sourceURL.trim()} onClick={props.add}>
           Add
-        </button>
+        </ButtonV2>
       </div>
       <div class="mt-3 space-y-2">
         <For each={props.sources}>
           {(source) => {
             const locked = source.id === OFFICIAL_MARKETPLACE_SOURCE.id
             return (
-              <div class="flex items-center justify-between gap-4 rounded-lg border border-border-weak bg-surface-base p-3">
+              <div data-slot="marketplace-source-card" class="flex items-center justify-between gap-4 rounded-lg p-3">
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="text-13-medium text-text-strong">{source.name}</span>
@@ -740,14 +745,15 @@ function Sources(props: {
                     disabled={props.busy}
                     onChange={() => props.toggle(source)}
                   />
-                  <button
+                  <ButtonV2
                     type="button"
+                    size="small"
+                    variant="ghost-muted"
                     disabled={props.busy || locked}
-                    class="rounded-md px-2 py-1 text-12-medium text-text-base hover:bg-surface-raised-base-hover disabled:opacity-40"
                     onClick={() => props.remove(source)}
                   >
                     Remove
-                  </button>
+                  </ButtonV2>
                 </div>
               </div>
             )
