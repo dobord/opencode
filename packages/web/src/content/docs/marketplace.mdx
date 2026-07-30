@@ -92,7 +92,8 @@ the entered path as the display/export reference.
 A local catalog can keep assets beside the catalog and reference them with safe `./` paths. Relative plugin files,
 skill paths or URLs, instructions, and icons are resolved from the catalog directory. Plugins, skills, and instructions
 are copied into the content-addressed immutable cache before activation, so an installed package remains usable if the
-source directory later becomes unavailable. `..` traversal is rejected.
+source directory later becomes unavailable. `..` traversal is rejected. File artifacts must resolve inside the local
+source directory, and network catalogs cannot reference `file://` artifacts.
 
 ```json title="team/marketplace.json"
 {

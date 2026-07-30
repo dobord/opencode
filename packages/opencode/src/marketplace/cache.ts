@@ -61,6 +61,7 @@ export interface Interface {
     signal?: AbortSignal
     kind?: string
     mode?: CacheMode
+    source?: MarketplaceSource
   }) => Effect.Effect<Response, CacheError>
   readonly fetcher: (mode?: CacheMode) => MarketplaceFetch
   readonly materializePlan: (
@@ -261,6 +262,33 @@ const layer = Layer.effect(
         catch: (error) => cacheError("read", error),
       })
 
+    const validateLocalArtifact = Effect.fnUntraced(function* (source: MarketplaceSource | undefined, target: URL) {
+      if (target.protocol !== "file:" || !source) return
+      const sourceURL = new URL(source.url)
+      if (sourceURL.protocol !== "file:") {
+        return yield* new CacheError({
+          operation: "validate local artifact",
+          message: `Network Marketplace source ${source.name} cannot reference local file ${target.href}`,
+        })
+      }
+
+      const sourcePath = fileURLToPath(sourceURL)
+      const rootPath = sourceURL.pathname.endsWith("/") ? sourcePath : path.dirname(sourcePath)
+      const targetPath = fileURLToPath(target)
+      const [root, candidate] = yield* Effect.tryPromise({
+        try: () => Promise.all([fsNode.realpath(rootPath), fsNode.realpath(targetPath)]),
+        catch: (error) => cacheError("validate local artifact", error),
+      })
+      const relative = path.relative(root, candidate)
+      if (relative === "") return
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        return yield* new CacheError({
+          operation: "validate local artifact",
+          message: `Local Marketplace artifact escapes its source directory: ${target.href}`,
+        })
+      }
+    })
+
     const put = Effect.fn("MarketplaceCache.put")(function* (
       bytes: Uint8Array,
       metadata: { mediaType?: string; kind?: string; sourceUrl?: string } = {},
@@ -349,8 +377,10 @@ const layer = Layer.effect(
       signal?: AbortSignal
       kind?: string
       mode?: CacheMode
+      source?: MarketplaceSource
     }) {
       const parsed = new URL(input.url)
+      yield* validateLocalArtifact(input.source, parsed)
       const url = parsed.href
       const key = requestKey(url, input.headers)
       const row = (yield* db
@@ -532,7 +562,12 @@ const layer = Layer.effect(
       })
     })
 
-    const fetchArtifact = Effect.fnUntraced(function* (input: { url: string; headers?: HeadersInit; kind: string }) {
+    const fetchArtifact = Effect.fnUntraced(function* (input: {
+      url: string
+      headers?: HeadersInit
+      kind: string
+      source: MarketplaceSource
+    }) {
       const response = yield* fetchResponse({ ...input, mode: "refresh" })
       const bytes = yield* Effect.tryPromise({
         try: () => response.arrayBuffer().then((buffer) => new Uint8Array(buffer)),
@@ -569,7 +604,7 @@ const layer = Layer.effect(
       const base = input.url.endsWith("/") ? input.url : `${input.url}/`
       const indexURL = new URL("index.json", base).href
       const headers = sameOriginHeaders(input.source, indexURL)
-      const indexArtifact = yield* fetchArtifact({ url: indexURL, headers, kind: "skill-index" })
+      const indexArtifact = yield* fetchArtifact({ url: indexURL, headers, kind: "skill-index", source: input.source })
       input.digests.add(indexArtifact.digest)
       const index = yield* Effect.try({
         try: () => readIndex(JSON.parse(new TextDecoder().decode(indexArtifact.bytes))),
@@ -592,6 +627,7 @@ const layer = Layer.effect(
             url,
             headers: sameOriginHeaders(input.source, url),
             kind: "skill-file",
+            source: input.source,
           })
           input.digests.add(artifact.digest)
           const relative = path.posix.join(skillRoot, safeRelative(file))
@@ -616,6 +652,7 @@ const layer = Layer.effect(
         url,
         headers: sameOriginHeaders(input.source, url),
         kind: "skill-file",
+        source: input.source,
       })
       input.digests.add(artifact.digest)
       const root = path.posix.join(input.prefix, safeSegment(input.name))
@@ -637,6 +674,7 @@ const layer = Layer.effect(
         url,
         headers: sameOriginHeaders(input.source, url),
         kind: "skill-file",
+        source: input.source,
       })
       input.digests.add(artifact.digest)
       const root = path.posix.join(input.prefix, safeSegment(input.item.id || input.item.name))
@@ -663,6 +701,7 @@ const layer = Layer.effect(
           url: spec,
           headers: sameOriginHeaders(source, spec),
           kind: "plugin-file",
+          source,
         })
         digests.add(artifact.digest)
         const basename = safeSegment(path.posix.basename(new URL(spec).pathname) || `plugin-${index}.js`)
@@ -727,6 +766,7 @@ const layer = Layer.effect(
           url,
           headers: sameOriginHeaders(source, url),
           kind: "instruction",
+          source,
         })
         digests.add(artifact.digest)
         const basename = safeSegment(path.posix.basename(new URL(url).pathname) || `instruction-${index}.md`)

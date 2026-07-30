@@ -106,6 +106,42 @@ describe("marketplace content-addressed cache", () => {
     ),
   )
 
+  it.effect("prevents network catalogs and local path escapes from reading file artifacts", () =>
+    Effect.acquireUseRelease(
+      Effect.tryPromise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-marketplace-boundary-"))),
+      (root) =>
+        Effect.gen(function* () {
+          const sourceRoot = path.join(root, "source")
+          const catalog = path.join(sourceRoot, "marketplace.json")
+          const outside = path.join(root, "outside.md")
+          yield* Effect.tryPromise(async () => {
+            await fs.mkdir(sourceRoot, { recursive: true })
+            await fs.writeFile(catalog, "{}")
+            await fs.writeFile(outside, "must not be loaded")
+          })
+
+          const cache = yield* MarketplaceCache.Service
+          const fileURL = pathToFileURL(outside).href
+          const escaped = yield* cache
+            .materializePlan(
+              { instructions: [fileURL] },
+              { id: "local", name: "Local", url: pathToFileURL(catalog).href, trust: "private" },
+            )
+            .pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }))
+          expect(escaped?.message).toContain("escapes its source directory")
+
+          const remote = yield* cache
+            .materializePlan(
+              { instructions: [fileURL] },
+              { id: "remote", name: "Remote", url: "https://example.test/marketplace.json", trust: "community" },
+            )
+            .pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }))
+          expect(remote?.message).toContain("cannot reference local file")
+        }),
+      (root) => Effect.tryPromise(() => fs.rm(root, { recursive: true, force: true })),
+    ),
+  )
+
   it.effect("materializes a remote skill into an immutable local tree", () =>
     Effect.acquireUseRelease(
       Effect.sync(() =>

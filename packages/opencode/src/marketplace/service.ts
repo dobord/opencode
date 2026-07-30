@@ -330,6 +330,7 @@ const layer = Layer.effect(
             headers: sourceHeaders(input.listing.source, icon),
             kind: "icon",
             mode: "refresh",
+            source: input.listing.source,
           })
           .pipe(
             Effect.tap((response) =>
