@@ -37,6 +37,26 @@ must_replace(
 )
 
 
+# Hey API's flat SDK still wraps body schemas under generated parameter names.
+# Keep the Desktop sync facade domain-shaped and adapt only at this transport
+# boundary, matching the TUI helpers and preserving call-site ergonomics.
+for old, new in {
+    "serverSDK.client.marketplace.plan(input)":
+        "serverSDK.client.marketplace.plan({ marketplacePlanInput: input })",
+    "serverSDK.client.marketplace.install(input)":
+        "serverSDK.client.marketplace.install({ marketplaceInstallInput: input })",
+    "serverSDK.client.marketplace.updateAll(input)":
+        "serverSDK.client.marketplace.updateAll({ marketplaceUpdateAllInput: input })",
+    "serverSDK.client.marketplace.sourceAdd(input)":
+        "serverSDK.client.marketplace.sourceAdd({ marketplaceSourceAddInput: input })",
+    "serverSDK.client.marketplace.profileExport(input)":
+        "serverSDK.client.marketplace.profileExport({ marketplaceProfileExportInput: input })",
+    "serverSDK.client.marketplace.cachePrune(input)":
+        "serverSDK.client.marketplace.cachePrune({ marketplaceCachePruneInput: input })",
+}.items():
+    must_replace("packages/app/src/context/server-sync.tsx", old, new)
+
+
 # Every public Marketplace operation needs an exerciser scenario so coverage,
 # authorization, and Effect-runtime modes validate the dedicated API surface.
 # The source scenario uses the built-in catalog URL to stay fully offline and
