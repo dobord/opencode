@@ -21,7 +21,7 @@ import {
 } from "@opencode-ai/core/marketplace"
 import { exportMarketplaceProfile } from "@opencode-ai/core/marketplace-profile"
 import { Config } from "@/config/config"
-import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import * as MarketplaceRegistry from "@/marketplace/registry"
 
 type Spin = {
   start: (msg: string) => void
@@ -261,17 +261,18 @@ const PluginMarketplaceAddCommand = effectCmd({
       }),
   handler: Effect.fn("Cli.plugin.marketplace.add")(function* (args) {
     const config = yield* Config.Service
+    const registry = yield* MarketplaceRegistry.Service
     const source = createMarketplaceSource({
       url: String(args.url),
       name: args.name ? String(args.name) : undefined,
       trust: args.trust as MarketplaceConfiguredTrust,
     })
-    const current = yield* config.getGlobal()
-    const result = yield* config.updateGlobal(
-      upsertMarketplaceSource(current as MarketplaceHostConfig, source) as ConfigV1.Info,
-    )
+    const current = yield* registry.read()
+    const next = upsertMarketplaceSource({ marketplace: current } as MarketplaceHostConfig, source).marketplace!
+    const result = yield* registry.replace(next).pipe(Effect.orDie)
+    if (result.changed) yield* config.invalidate()
     log.success(`${result.changed ? "Added" : "Already configured"} marketplace ${source.name}`)
-    log.info(source.url)
+    log.info(source.reference ?? source.url)
   }),
 })
 
@@ -290,9 +291,8 @@ const PluginMarketplaceExportCommand = effectCmd({
         describe: "profile name",
       }),
   handler: Effect.fn("Cli.plugin.marketplace.export")(function* (args) {
-    const config = yield* Config.Service
-    const current = (yield* config.getGlobal()) as MarketplaceHostConfig
-    const profile = exportMarketplaceProfile(current.marketplace ?? {}, { name: String(args.name) })
+    const registry = yield* MarketplaceRegistry.Service
+    const profile = exportMarketplaceProfile(yield* registry.read(), { name: String(args.name) })
     const output = `${JSON.stringify(profile, null, 2)}\n`
     if (args.file) {
       const file = path.resolve(String(args.file))

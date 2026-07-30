@@ -34,6 +34,7 @@ import fs from "fs/promises"
 import os from "os"
 import { pathToFileURL } from "url"
 import { Global } from "@opencode-ai/core/global"
+import * as MarketplaceRegistry from "@/marketplace/registry"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigPlugin } from "@/config/plugin"
@@ -98,12 +99,15 @@ const configLayer = (
     client?: HttpClient.HttpClient
   } = {},
 ) =>
-  LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
-    [Auth.node, options.auth ?? AuthTest.empty],
-    [Account.node, options.account ?? AccountTest.empty],
-    [Npm.node, NpmTest.noop],
-    [httpClient, Layer.succeed(HttpClient.HttpClient, options.client ?? unexpectedHttp)],
-  ])
+  LayerNode.compile(
+    LayerNode.group([Config.node, MarketplaceRegistry.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]),
+    [
+      [Auth.node, options.auth ?? AuthTest.empty],
+      [Account.node, options.account ?? AccountTest.empty],
+      [Npm.node, NpmTest.noop],
+      [httpClient, Layer.succeed(HttpClient.HttpClient, options.client ?? unexpectedHttp)],
+    ],
+  )
 
 const layer = configLayer()
 
@@ -399,7 +403,7 @@ it.effect("updates global config and omits empty shell key in jsonc", () =>
   ),
 )
 
-it.effect("stores marketplace installs outside the global json config", () =>
+it.effect("stores marketplace installs in SQLite outside the global json config", () =>
   withGlobalConfig(
     {
       config: {
@@ -410,46 +414,42 @@ it.effect("stores marketplace installs outside the global json config", () =>
     },
     ({ dir }) =>
       Effect.gen(function* () {
+        const registry = yield* MarketplaceRegistry.Service
         const file = path.join(dir, "opencode.json")
         const before = yield* FSUtil.use.readFileString(file)
         const plan = { commands: { review: { template: "review" } } }
-        const result = yield* Config.use.updateGlobal({
-          $schema: "https://opencode.ai/config.json",
-          command: { keep: { template: "keep" }, review: { template: "review" } },
-          marketplace: {
-            revision: 0,
-            installed: {
-              "community:tools:review": {
-                source: "community",
-                catalog: "tools",
-                item: "review",
-                name: "Review",
-                kind: "command",
-                version: "1.0.0",
-                fingerprint: "review-v1",
-                installed_at: "2026-07-29T00:00:00.000Z",
-                updated_at: "2026-07-29T00:00:00.000Z",
-                plan,
-                active_plan: plan,
-                receipt: {},
-              },
+        const stored = yield* registry.replace({
+          revision: 0,
+          installed: {
+            "community:tools:review": {
+              source: "community",
+              catalog: "tools",
+              item: "review",
+              name: "Review",
+              kind: "command",
+              version: "1.0.0",
+              fingerprint: "review-v1",
+              installed_at: "2026-07-29T00:00:00.000Z",
+              updated_at: "2026-07-29T00:00:00.000Z",
+              plan,
+              active_plan: plan,
+              receipt: {},
             },
           },
         })
+        yield* Config.use.invalidate()
 
+        const result = yield* Config.use.getGlobal()
         expect(yield* FSUtil.use.readFileString(file)).toBe(before)
-        expect(result.info.command).toEqual({ keep: { template: "keep" }, review: { template: "review" } })
-        expect(result.info.marketplace?.revision).toBe(1)
-        expect(yield* FSUtil.use.readJson(path.join(Global.Path.data, "marketplace", "registry.json"))).toMatchObject({
-          schema: "opencode.marketplace.registry/v1",
-          revision: 1,
-          state: { installed: { "community:tools:review": { item: "review" } } },
-        })
+        expect(result.command).toEqual({ keep: { template: "keep" }, review: { template: "review" } })
+        expect(result.marketplace?.revision).toBe(stored.state.revision)
+        expect((yield* registry.read()).installed?.["community:tools:review"]?.item).toBe("review")
+        expect(yield* FSUtil.use.existsSafe(path.join(Global.Path.data, "marketplace", "registry.json"))).toBe(false)
       }),
   ),
 )
 
-it.effect("stores marketplace sources outside jsonc without changing comments", () =>
+it.effect("stores marketplace sources in SQLite outside jsonc without changing comments", () =>
   withGlobalConfig(
     {
       config: {
@@ -459,27 +459,26 @@ it.effect("stores marketplace sources outside jsonc without changing comments", 
     },
     ({ dir }) =>
       Effect.gen(function* () {
+        const registry = yield* MarketplaceRegistry.Service
         const file = path.join(dir, "opencode.jsonc")
         const before = yield* FSUtil.use.readFileString(file)
-        const result = yield* Config.use.updateGlobal({
-          $schema: "https://opencode.ai/config.json",
-          model: "test/model",
-          marketplace: {
-            revision: 0,
-            sources: [
-              {
-                id: "community",
-                name: "Community",
-                url: "https://example.test/catalog.json",
-                trust: "community",
-              },
-            ],
-          },
+        const result = yield* registry.replace({
+          revision: 0,
+          sources: [
+            {
+              id: "community",
+              name: "Community",
+              url: "https://example.test/catalog.json",
+              trust: "community",
+            },
+          ],
         })
+        yield* Config.use.invalidate()
 
         expect(yield* FSUtil.use.readFileString(file)).toBe(before)
-        expect(result.info.marketplace?.sources?.map((source) => source.id)).toEqual(["community"])
-        expect(result.info.marketplace?.revision).toBe(1)
+        const effective = yield* Config.use.getGlobal()
+        expect(effective.marketplace?.sources?.map((source) => source.id)).toEqual(["community"])
+        expect(effective.marketplace?.revision).toBe(result.state.revision)
       }),
   ),
 )

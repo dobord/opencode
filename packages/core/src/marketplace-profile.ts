@@ -41,7 +41,7 @@ export function exportMarketplaceProfile(
     sources.set(source.id, {
       id: source.id,
       name: source.name,
-      url: source.url,
+      url: source.reference ?? source.url,
       ...(source.trust ? { trust: source.trust } : {}),
     })
   }

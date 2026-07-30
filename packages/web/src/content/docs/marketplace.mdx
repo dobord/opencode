@@ -199,3 +199,23 @@ Marketplace is a discovery and configuration mechanism, not a sandbox.
 
 Review the publisher, source, repository, requested capabilities, and resulting configuration before installation.
 Prefer trusted catalogs for executable plugins and pin package versions when reproducibility matters.
+
+## Local registry, artifact cache, and API
+
+Marketplace runtime state is stored in the OpenCode SQLite database. Sources, installed packages, component switches,
+artifact references, and the monotonic registry revision are application state and are never written to
+`opencode.json` or `opencode.jsonc`.
+
+Catalog responses, exact item manifests, icons, remote skill files, and remote instruction files are stored in a
+SHA-256 content-addressed cache under the OpenCode cache directory. Remote skills and instructions are materialized
+into immutable local trees before their install plan becomes active. Catalog refresh uses conditional HTTP requests
+when ETag or Last-Modified metadata is available and falls back to the last validated cached response while offline.
+
+The desktop app and TUI use the dedicated `/marketplace` API. Every mutation sends the revision it observed. A stale
+client receives a revision conflict instead of silently overwriting another client. Installation and update also
+separate planning from execution so trust warnings and configuration conflicts can be reviewed before executable
+content is activated.
+
+This feature is still under development. OpenCode creates the Marketplace tables as part of the normal database
+schema migration, but it intentionally does not import state from experimental `registry.json` files or Marketplace
+configuration written by earlier development commits.

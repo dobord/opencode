@@ -58,6 +58,84 @@ function locationData(validate: (value: any) => void) {
 }
 
 const scenarios: Scenario[] = [
+  http.protected.get("/marketplace", "marketplace.get").global().json(200, object, "status"),
+  http.protected.post("/marketplace/refresh", "marketplace.refresh").global().json(200, object, "status"),
+  http.protected
+    .post("/marketplace/plan", "marketplace.plan")
+    .global()
+    .at(() => ({ path: "/marketplace/plan", body: { key: "missing-httpapi" } }))
+    .json(200, object, "status"),
+  http.protected
+    .post("/marketplace/install", "marketplace.install")
+    .global()
+    .at(() => ({
+      path: "/marketplace/install",
+      body: { key: "missing-httpapi", expected_revision: 0 },
+    }))
+    .json(200, object, "status"),
+  http.protected
+    .post("/marketplace/update-all", "marketplace.updateAll")
+    .global()
+    .mutating()
+    .at(() => ({ path: "/marketplace/update-all", body: { expected_revision: 0 } }))
+    .json(200, object, "status"),
+  http.protected
+    .delete("/marketplace/install/{key}", "marketplace.uninstall")
+    .global()
+    .at(() => ({
+      path: route("/marketplace/install/{key}", { key: "missing-httpapi" }),
+      body: { expected_revision: 0 },
+    }))
+    .json(200, object, "status"),
+  http.protected
+    .patch("/marketplace/install/{key}", "marketplace.toggle")
+    .global()
+    .at(() => ({
+      path: route("/marketplace/install/{key}", { key: "missing-httpapi" }),
+      body: { expected_revision: 0, component: "package", enabled: false },
+    }))
+    .json(200, object, "status"),
+  http.protected
+    .post("/marketplace/source", "marketplace.sourceAdd")
+    .global()
+    .mutating()
+    .at(() => ({
+      path: "/marketplace/source",
+      body: {
+        expected_revision: 0,
+        url: "builtin://opencode",
+        name: "HTTP API Marketplace",
+        trust: "community",
+      },
+    }))
+    .json(200, object, "status"),
+  http.protected
+    .patch("/marketplace/source/{id}", "marketplace.sourceToggle")
+    .global()
+    .at(() => ({
+      path: route("/marketplace/source/{id}", { id: "missing-httpapi-source" }),
+      body: { expected_revision: 0, enabled: false },
+    }))
+    .json(200, object, "status"),
+  http.protected
+    .delete("/marketplace/source/{id}", "marketplace.sourceRemove")
+    .global()
+    .at(() => ({
+      path: route("/marketplace/source/{id}", { id: "missing-httpapi-source" }),
+      body: { expected_revision: 0 },
+    }))
+    .json(200, object, "status"),
+  http.protected
+    .post("/marketplace/profile", "marketplace.profileExport")
+    .global()
+    .at(() => ({ path: "/marketplace/profile", body: { name: "httpapi" } }))
+    .json(200, object, "status"),
+  http.protected
+    .post("/marketplace/cache/prune", "marketplace.cachePrune")
+    .global()
+    .mutating()
+    .at(() => ({ path: "/marketplace/cache/prune", body: { max_age_days: 0 } }))
+    .json(200, object, "status"),
   http.protected
     .get("/global/health", "global.health")
     .global()
