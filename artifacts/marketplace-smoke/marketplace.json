@@ -1,0 +1,67 @@
+{
+  "schema": "opencode.marketplace/v1",
+  "id": "smoke-lab",
+  "name": "Marketplace Smoke Lab",
+  "description": "Local end-to-end marketplace verification fixtures.",
+  "publisher": {
+    "name": "OpenCode Test Lab"
+  },
+  "items": [
+    {
+      "id": "alpha-tools",
+      "name": "Alpha Tools",
+      "description": "Alpha plugin, skill, and MCP tool for local marketplace smoke tests.",
+      "kind": "bundle",
+      "version": "1.0.0",
+      "icon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+ZBfLZQAAAABJRU5ErkJggg==",
+      "brand_color": "#0F766E",
+      "install": {
+        "plugins": ["./plugins/alpha.ts"],
+        "skills": {
+          "items": [
+            {
+              "id": "alpha-skill",
+              "name": "marketplace-alpha",
+              "description": "Use the Alpha MCP tool for the marketplace smoke check.",
+              "url": "./skills/alpha/"
+            }
+          ]
+        },
+        "mcp": {
+          "marketplace_alpha": {
+            "type": "local",
+            "command": ["node", "./mcp/alpha.mjs"]
+          }
+        }
+      }
+    },
+    {
+      "id": "bravo-tools",
+      "name": "Bravo Tools",
+      "description": "Bravo plugin, skill, and MCP tool for local marketplace smoke tests.",
+      "kind": "bundle",
+      "version": "1.0.0",
+      "icon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAgL+ZBfLZQAAAABJRU5ErkJggg==",
+      "brand_color": "#B45309",
+      "install": {
+        "plugins": ["./plugins/bravo.ts"],
+        "skills": {
+          "items": [
+            {
+              "id": "bravo-skill",
+              "name": "marketplace-bravo",
+              "description": "Use the Bravo MCP tool for the marketplace smoke check.",
+              "url": "./skills/bravo/"
+            }
+          ]
+        },
+        "mcp": {
+          "marketplace_bravo": {
+            "type": "local",
+            "command": ["node", "./mcp/bravo.mjs"]
+          }
+        }
+      }
+    }
+  ]
+}

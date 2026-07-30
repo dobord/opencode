@@ -77,6 +77,7 @@ describe("marketplace content-addressed cache", () => {
               skills: {
                 items: [{ id: "review", name: "review", url: pathToFileURL(path.dirname(skill)).href + "/" }],
               },
+              mcp: { review_tools: { type: "local", command: [process.execPath, pathToFileURL(plugin).href] } },
               instructions: [pathToFileURL(instruction).href],
             },
             {
@@ -97,6 +98,10 @@ describe("marketplace content-addressed cache", () => {
           expect(yield* Effect.promise(() => fs.readFile(path.join(skillItem!.path!, "SKILL.md"), "utf8"))).toContain(
             "Review the current diff",
           )
+          const mcpCommand = materialized.plan.mcp?.review_tools?.command
+          if (!Array.isArray(mcpCommand)) throw new Error("Expected a materialized MCP command")
+          expect(mcpCommand?.[1]?.startsWith(root)).toBe(false)
+          expect(yield* Effect.promise(() => fs.readFile(String(mcpCommand?.[1]), "utf8"))).toContain("MarketplacePlugin")
           const materializedInstruction = materialized.plan.instructions?.[0]
           expect(materializedInstruction?.startsWith("file:")).toBe(false)
           expect(yield* Effect.promise(() => fs.readFile(materializedInstruction!, "utf8"))).toContain("Always review")

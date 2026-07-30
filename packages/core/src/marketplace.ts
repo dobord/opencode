@@ -1429,6 +1429,12 @@ function resolveCatalogAssets(catalog: MarketplaceCatalog, source: string): Mark
 
 function resolveCatalogPlan(plan: MarketplaceInstallPlan, source: string): MarketplaceInstallPlan {
   const plugins = plan.plugins?.map((plugin, index) => resolveCatalogPlugin(plugin, source, index))
+  const mcp = Object.fromEntries(
+    Object.entries(plan.mcp ?? {}).map(([name, config]) => [
+      name,
+      resolveCatalogMcp(config, source, `install.mcp.${name}`),
+    ]),
+  )
   const relativeSkillPaths = (plan.skills?.paths ?? []).filter((value) => value.startsWith("./"))
   const skillPaths = (plan.skills?.paths ?? []).filter((value) => !value.startsWith("./"))
   const skillURLs = Array.from(
@@ -1446,6 +1452,7 @@ function resolveCatalogPlan(plan: MarketplaceInstallPlan, source: string): Marke
   return {
     ...clone(plan),
     ...(plugins ? { plugins } : {}),
+    ...(plan.mcp ? { mcp } : {}),
     ...(plan.skills
       ? {
           skills: {
@@ -1462,6 +1469,18 @@ function resolveCatalogPlan(plan: MarketplaceInstallPlan, source: string): Marke
           ),
         }
       : {}),
+  }
+}
+
+function resolveCatalogMcp(config: Record<string, unknown>, source: string, label: string) {
+  if (config.type !== "local" || !Array.isArray(config.command)) return clone(config)
+  return {
+    ...clone(config),
+    command: config.command.map((value, index) =>
+      typeof value === "string" && value.startsWith("./")
+        ? resolveCatalogAsset(value, source, `${label}.command[${index}]`)
+        : value,
+    ),
   }
 }
 

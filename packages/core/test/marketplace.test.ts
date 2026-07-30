@@ -241,6 +241,36 @@ describe("marketplace catalogs", () => {
     ).toThrow("absolute HTTP or HTTPS")
   })
 
+  test("resolves local MCP command artifacts relative to the catalog", async () => {
+    const source = createMarketplaceSource({ url: "https://example.test/catalog/marketplace.json" })
+    const result = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async () =>
+        Response.json({
+          schema: "opencode.marketplace/v1",
+          id: "tools",
+          name: "Tools",
+          items: [
+            {
+              id: "review",
+              name: "Review",
+              description: "Review tools",
+              kind: "mcp",
+              version: "1.0.0",
+              install: {
+                mcp: { review: { type: "local", command: ["node", "./mcp/review.mjs"] } },
+              },
+            },
+          ],
+        }),
+    })
+
+    expect(result.listings[0]?.item.install.mcp?.review).toEqual({
+      type: "local",
+      command: ["node", "https://example.test/catalog/mcp/review.mjs"],
+    })
+  })
+
   test("loads a local directory catalog and resolves catalog-relative assets", async () => {
     const source = createMarketplaceSource({ url: "file:///tmp/team-marketplace/", name: "Local team" })
     const requests: string[] = []

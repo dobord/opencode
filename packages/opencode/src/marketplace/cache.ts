@@ -693,6 +693,7 @@ const layer = Layer.effect(
       const legacyRoots: string[] = []
       const itemRoots = new Map<string, string>()
       const pluginRelatives = new Map<number, string>()
+      const mcpCommandRelatives = new Map<string, Map<number, string>>()
 
       for (const [index, plugin] of (plan.plugins ?? []).entries()) {
         const spec = Array.isArray(plugin) ? plugin[0] : plugin
@@ -708,6 +709,26 @@ const layer = Layer.effect(
         const relative = path.posix.join("plugins", `${index}-${basename}`)
         entries.set(relative, { relative, bytes: artifact.bytes, digest: artifact.digest })
         pluginRelatives.set(index, relative)
+      }
+
+      for (const [name, config] of Object.entries(plan.mcp ?? {})) {
+        if (config.type !== "local" || !Array.isArray(config.command)) continue
+        for (const [index, command] of config.command.entries()) {
+          if (typeof command !== "string" || !isArtifactURL(command)) continue
+          const artifact = yield* fetchArtifact({
+            url: command,
+            headers: sameOriginHeaders(source, command),
+            kind: "mcp-file",
+            source,
+          })
+          digests.add(artifact.digest)
+          const basename = safeSegment(path.posix.basename(new URL(command).pathname) || `command-${index}`)
+          const relative = path.posix.join("mcp", safeSegment(name), `${index}-${basename}`)
+          entries.set(relative, { relative, bytes: artifact.bytes, digest: artifact.digest })
+          const commands = mcpCommandRelatives.get(name) ?? new Map<number, string>()
+          commands.set(index, relative)
+          mcpCommandRelatives.set(name, commands)
+        }
       }
 
       for (const [index, url] of (plan.skills?.urls ?? []).entries()) {
@@ -831,6 +852,25 @@ const layer = Layer.effect(
           const spec = pathToFileURL(path.join(target, ...relative.split("/"))).href
           return (Array.isArray(plugin) ? [spec, clone(plugin[1])] : spec) as MarketplacePluginSpec
         })
+      }
+
+      if (plan.mcp && mcpCommandRelatives.size) {
+        plan.mcp = Object.fromEntries(
+          Object.entries(plan.mcp).map(([name, config]) => {
+            const commands = mcpCommandRelatives.get(name)
+            if (!commands || !Array.isArray(config.command)) return [name, config]
+            return [
+              name,
+              {
+                ...config,
+                command: config.command.map((command, index) => {
+                  const relative = commands.get(index)
+                  return relative ? path.join(target, ...relative.split("/")) : command
+                }),
+              },
+            ]
+          }),
+        )
       }
 
       if (plan.skills) {
