@@ -91,7 +91,31 @@ jobs:
         shell: bash
         run: |
           cd packages/sdk/js
-          bun run build
+          set +e
+          bun run build 2>&1 | tee /tmp/marketplace-sdk-build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          types = Path('src/v2/gen/types.gen.ts').read_text() if Path('src/v2/gen/types.gen.ts').exists() else ''
+          names = sorted(set(re.findall(r'export type (SessionNext\w+1) =', types)))
+          print('MARKETPLACE_SDK_DUPLICATES=' + ','.join(names))
+          document = json.loads(Path('openapi.json').read_text())
+          schemas = document.get('components', {}).get('schemas', {})
+          for name in names:
+              original = name[:-1]
+              duplicate = schemas.get(name)
+              base = schemas.get(original)
+              print(f'MARKETPLACE_SCHEMA_DUPLICATE {name} base={original}')
+              print('duplicate=' + json.dumps(duplicate, sort_keys=True, separators=(',', ':'))[:4000])
+              print('base=' + json.dumps(base, sort_keys=True, separators=(',', ':'))[:4000])
+          PY
+            exit "$status"
+          fi
           cd ../../client
           bun run generate
 
