@@ -40,6 +40,7 @@ jobs:
           python3 .github/agent-marketplace-sqlite-api-cache/apply.py
           python3 - <<'PY'
           from pathlib import Path
+
           schema = Path('packages/core/src/marketplace-schema.ts')
           text = schema.read_text()
           old = 'export const Profile = Schema.Unknown.annotate({ identifier: "MarketplaceProfile" })'
@@ -76,6 +77,14 @@ jobs:
           if old not in text:
               raise SystemExit('Marketplace profile schema anchor was not found')
           schema.write_text(text.replace(old, new, 1))
+
+          test = Path('packages/opencode/test/marketplace/cache.test.ts')
+          text = test.read_text()
+          old = 'expect(await fs.readFile(`${item!.path}/SKILL.md`, "utf8")).toContain("Review the current diff")'
+          new = 'expect(yield* Effect.promise(() => fs.readFile(`${item!.path}/SKILL.md`, "utf8"))).toContain("Review the current diff")'
+          if old not in text:
+              raise SystemExit('Marketplace cache test async anchor was not found')
+          test.write_text(text.replace(old, new, 1))
           PY
           rm -rf .github/agent-marketplace-sqlite-api-cache
           rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
