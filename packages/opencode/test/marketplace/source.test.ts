@@ -27,8 +27,12 @@ describe("marketplace local source references", () => {
       const relative = await resolveMarketplaceSourceReference("./marketplace.json", root)
       expect(fileURLToPath(relative.url)).toBe(catalog)
 
-      const fromURL = await resolveMarketplaceSourceReference(pathToFileURL(catalog).href)
+      const fileURL = pathToFileURL(catalog).href
+      const fromURL = await resolveMarketplaceSourceReference(fileURL)
       expect(fileURLToPath(fromURL.url)).toBe(catalog)
+
+      const fromUppercaseURL = await resolveMarketplaceSourceReference(fileURL.replace(/^file:/, "FILE:"))
+      expect(fileURLToPath(fromUppercaseURL.url)).toBe(catalog)
 
       const remote = await resolveMarketplaceSourceReference("https://example.test/marketplace.json")
       expect(remote).toEqual({
