@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/marketplace-settings-v2-style
+  pull_request:
+    branches:
+      - marketplace
 
 concurrency:
   group: marketplace-settings-v2-style
