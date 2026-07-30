@@ -31,7 +31,7 @@ jobs:
         uses: ./.github/actions/setup-bun
 
       - name: Apply documentation and integration fixes
-        run: python3 .github/agent-marketplace-finalize/apply.py
+        run: python3 .github/agent-marketplace-finalize/apply.py && python3 .github/agent-marketplace-finalize/adjust_test_layer.py
 
       - name: Format changed sources
         run: |
