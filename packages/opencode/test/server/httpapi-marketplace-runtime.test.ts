@@ -48,6 +48,7 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(
     Layer.mock(MarketplaceService)({
+      icon: () => Effect.succeed({ data_url: "data:image/png;base64,aWNvbg==" }),
       install: () => Effect.succeed(mutation),
     }),
   ),
@@ -63,6 +64,21 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("marketplace runtime activation", () => {
+  it.live("serves marketplace icons through the authenticated API", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(
+        MarketplacePaths.icon
+          .replace(":key", encodeURIComponent("source:catalog:item"))
+          .replace(":variant", "src-light"),
+      ).pipe(HttpClient.execute)
+
+      expect(response.status).toBe(200)
+      expect((yield* response.json) as { data_url: string }).toEqual({
+        data_url: "data:image/png;base64,aWNvbg==",
+      })
+    }),
+  )
+
   it.live("waits for instance disposal before acknowledging a changed install", () =>
     Effect.gen(function* () {
       yield* Ref.set(disposed, false)

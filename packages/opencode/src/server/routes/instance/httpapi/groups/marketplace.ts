@@ -8,6 +8,7 @@ const root = "/marketplace"
 export const MarketplacePaths = {
   get: root,
   refresh: `${root}/refresh`,
+  icon: `${root}/icon/:key/:variant`,
   plan: `${root}/plan`,
   install: `${root}/install`,
   updateAll: `${root}/update-all`,
@@ -37,6 +38,19 @@ export const MarketplaceApi = HttpApi.make("marketplace").add(
           identifier: "marketplace.refresh",
           summary: "Refresh Marketplace",
           description: "Revalidate enabled catalog sources and return the current Marketplace view.",
+        }),
+      ),
+      HttpApiEndpoint.get("icon", MarketplacePaths.icon, {
+        params: {
+          key: Schema.String,
+          variant: Schema.Literals(["src-light", "src-dark"]),
+        },
+        success: described(MarketplaceSchema.IconResult, "Marketplace icon data"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "marketplace.icon",
+          summary: "Get Marketplace icon",
+          description: "Load a catalog icon through the authenticated server for local filesystem sources.",
         }),
       ),
       HttpApiEndpoint.post("plan", MarketplacePaths.plan, {

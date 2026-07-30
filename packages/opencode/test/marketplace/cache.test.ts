@@ -46,12 +46,14 @@ describe("marketplace content-addressed cache", () => {
           const plugin = path.join(root, "plugin.ts")
           const skill = path.join(root, "skills", "review", "SKILL.md")
           const instruction = path.join(root, "review.md")
+          const icon = path.join(root, "icon.png")
           yield* Effect.tryPromise(async () => {
             await fs.mkdir(path.dirname(skill), { recursive: true })
             await fs.writeFile(catalog, '{"version":1}')
             await fs.writeFile(plugin, "export const MarketplacePlugin = async () => ({})")
             await fs.writeFile(skill, "---\nname: review\ndescription: Review changes\n---\nReview the current diff.")
             await fs.writeFile(instruction, "Always review the current diff.")
+            await fs.writeFile(icon, "local icon")
           })
 
           const cache = yield* MarketplaceCache.Service
@@ -70,6 +72,17 @@ describe("marketplace content-addressed cache", () => {
             kind: "catalog",
           })
           expect(yield* Effect.promise(() => refreshed.text())).toBe('{"version":2}')
+          expect(
+            yield* cache.dataURL({
+              url: pathToFileURL(icon).href,
+              source: {
+                id: "local",
+                name: "Local",
+                url: pathToFileURL(catalog).href,
+                trust: "private",
+              },
+            }),
+          ).toBe("data:image/png;base64,bG9jYWwgaWNvbg==")
 
           const materialized = yield* cache.materializePlan(
             {
@@ -101,7 +114,9 @@ describe("marketplace content-addressed cache", () => {
           const mcpCommand = materialized.plan.mcp?.review_tools?.command
           if (!Array.isArray(mcpCommand)) throw new Error("Expected a materialized MCP command")
           expect(mcpCommand?.[1]?.startsWith(root)).toBe(false)
-          expect(yield* Effect.promise(() => fs.readFile(String(mcpCommand?.[1]), "utf8"))).toContain("MarketplacePlugin")
+          expect(yield* Effect.promise(() => fs.readFile(String(mcpCommand?.[1]), "utf8"))).toContain(
+            "MarketplacePlugin",
+          )
           const materializedInstruction = materialized.plan.instructions?.[0]
           expect(materializedInstruction?.startsWith("file:")).toBe(false)
           expect(yield* Effect.promise(() => fs.readFile(materializedInstruction!, "utf8"))).toContain("Always review")

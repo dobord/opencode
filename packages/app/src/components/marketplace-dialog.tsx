@@ -527,8 +527,14 @@ function Status(props: { value: ReturnType<typeof marketplaceStatus> }) {
 }
 
 function PluginIcon(props: { listing: MarketplaceListing }) {
+  const sync = useServerSync()
   const [failed, setFailed] = createSignal(false)
   const src = () => props.listing.item.icon?.["src-light"]
+  const [local] = createResource(
+    () => (src()?.startsWith("file:") ? props.listing.key : undefined),
+    (key) => sync().marketplace.icon({ key, variant: "src-light" }),
+  )
+  const resolved = () => (src()?.startsWith("file:") ? local()?.data_url : src())
   const initials = () =>
     props.listing.item.name
       .split(/\s+/)
@@ -541,9 +547,9 @@ function PluginIcon(props: { listing: MarketplaceListing }) {
       class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-12-medium text-white shadow-sm"
       style={{ "background-color": props.listing.item.brand_color ?? "#5C6470" }}
     >
-      <Show when={src() && !failed()} fallback={<span aria-hidden="true">{initials()}</span>}>
+      <Show when={resolved() && !failed()} fallback={<span aria-hidden="true">{initials()}</span>}>
         <img
-          src={src()}
+          src={resolved()}
           alt=""
           loading="lazy"
           referrerpolicy="no-referrer"

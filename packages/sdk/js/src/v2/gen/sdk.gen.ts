@@ -98,6 +98,8 @@ import type {
   MarketplaceCachePruneResponses,
   MarketplaceGetErrors,
   MarketplaceGetResponses,
+  MarketplaceIconErrors,
+  MarketplaceIconResponses,
   MarketplaceInstallErrors,
   MarketplaceInstallInput,
   MarketplaceInstallResponses,
@@ -1441,6 +1443,36 @@ export class Marketplace extends HeyApiClient {
   }
 
   /**
+   * Get Marketplace icon
+   *
+   * Load a catalog icon through the authenticated server for local filesystem sources.
+   */
+  public icon<ThrowOnError extends boolean = false>(
+    parameters: {
+      key: string
+      variant: "src-light" | "src-dark"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "key" },
+            { in: "path", key: "variant" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MarketplaceIconResponses, MarketplaceIconErrors, ThrowOnError>({
+      url: "/marketplace/icon/{key}/{variant}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Plan Marketplace install
    *
    * Preview trust requirements, permissions, and configuration conflicts.
@@ -1593,7 +1625,7 @@ export class Marketplace extends HeyApiClient {
   /**
    * Add Marketplace source
    *
-   * Add or replace a Marketplace catalog source.
+   * Add or replace an HTTPS, Git repository, file URL, or local filesystem Marketplace source.
    */
   public sourceAdd<ThrowOnError extends boolean = false>(
     parameters?: {

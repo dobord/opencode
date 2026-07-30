@@ -91,6 +91,10 @@ export const PlanInput = Schema.Struct({
   key: Schema.String,
 }).annotate({ identifier: "MarketplacePlanInput" })
 
+export const IconResult = Schema.Struct({
+  data_url: Schema.optional(Schema.String),
+}).annotate({ identifier: "MarketplaceIconResult" })
+
 export const PlanResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),

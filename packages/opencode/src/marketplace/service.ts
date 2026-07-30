@@ -62,8 +62,14 @@ export type SourceAddInput = {
   headers?: Record<string, string>
 }
 
+export type IconInput = {
+  key: string
+  variant: "src-light" | "src-dark"
+}
+
 export interface Interface {
   readonly get: (options?: { refresh?: boolean }) => Effect.Effect<MarketplaceView>
+  readonly icon: (input: IconInput) => Effect.Effect<{ data_url?: string }>
   readonly plan: (key: string) => Effect.Effect<MarketplacePlanResult>
   readonly install: (input: InstallInput) => Effect.Effect<MarketplaceMutationResult>
   readonly updateAll: (input: UpdateAllInput) => Effect.Effect<MarketplaceMutationResult>
@@ -234,6 +240,25 @@ const layer = Layer.effect(
         catch: (error) => error,
       }).pipe(Effect.orDie)
       return loaded.listings.find((listing) => listing.key === key)
+    })
+
+    const icon = Effect.fn("MarketplaceService.icon")(function* (input: IconInput) {
+      const state = yield* registry.read()
+      const listing = yield* findListing(state, input.key, false)
+      const url = listing?.item.icon?.[input.variant]
+      if (!listing || !url) return {}
+      const dataURL = yield* cache
+        .dataURL({
+          url,
+          headers: sourceHeaders(listing.source, url),
+          source: listing.source,
+        })
+        .pipe(
+          Effect.map((value) => ({ ok: true as const, value })),
+          Effect.catch(() => Effect.succeed({ ok: false as const })),
+        )
+      if (!dataURL.ok || !dataURL.value) return {}
+      return { data_url: dataURL.value }
     })
 
     const prepare = Effect.fnUntraced(function* (input: {
@@ -619,6 +644,7 @@ const layer = Layer.effect(
 
     return Service.of({
       get,
+      icon,
       plan,
       install,
       updateAll,

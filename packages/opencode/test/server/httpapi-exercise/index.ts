@@ -61,6 +61,16 @@ const scenarios: Scenario[] = [
   http.protected.get("/marketplace", "marketplace.get").global().json(200, object, "status"),
   http.protected.post("/marketplace/refresh", "marketplace.refresh").global().json(200, object, "status"),
   http.protected
+    .get("/marketplace/icon/{key}/{variant}", "marketplace.icon")
+    .global()
+    .at(() => ({
+      path: route("/marketplace/icon/{key}/{variant}", {
+        key: "missing-httpapi",
+        variant: "src-light",
+      }),
+    }))
+    .json(200, object, "status"),
+  http.protected
     .post("/marketplace/plan", "marketplace.plan")
     .global()
     .at(() => ({ path: "/marketplace/plan", body: { key: "missing-httpapi" } }))

@@ -16,6 +16,12 @@ export const marketplaceHandlers = HttpApiBuilder.group(RootHttpApi, "marketplac
     return handlers
       .handle("get", () => marketplace.get())
       .handle("refresh", () => marketplace.get({ refresh: true }))
+      .handle("icon", (ctx) =>
+        marketplace.icon({
+          key: ctx.params.key,
+          variant: ctx.params.variant,
+        }),
+      )
       .handle("plan", (ctx) => marketplace.plan(ctx.payload.key))
       .handle("install", (ctx) =>
         marketplace

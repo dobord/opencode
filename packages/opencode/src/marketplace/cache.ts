@@ -17,6 +17,7 @@ import type {
 } from "@opencode-ai/core/marketplace"
 
 export type CacheMode = "cache-first" | "refresh"
+const MAX_ICON_BYTES = 5 * 1024 * 1024
 
 export type Artifact = {
   digest: string
@@ -63,6 +64,12 @@ export interface Interface {
     mode?: CacheMode
     source?: MarketplaceSource
   }) => Effect.Effect<Response, CacheError>
+  readonly dataURL: (input: {
+    url: string
+    headers?: HeadersInit
+    mode?: CacheMode
+    source?: MarketplaceSource
+  }) => Effect.Effect<string | undefined, CacheError>
   readonly fetcher: (mode?: CacheMode) => MarketplaceFetch
   readonly materializePlan: (
     plan: MarketplaceInstallPlan,
@@ -593,6 +600,22 @@ const layer = Layer.effect(
       }
     }
 
+    const dataURL = Effect.fn("MarketplaceCache.dataURL")(function* (input: {
+      url: string
+      headers?: HeadersInit
+      mode?: CacheMode
+      source?: MarketplaceSource
+    }) {
+      const response = yield* fetchResponse({ ...input, kind: "icon" })
+      const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase()
+      if (!mediaType || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType)) return
+      const declared = Number(response.headers.get("content-length"))
+      if (Number.isFinite(declared) && declared > MAX_ICON_BYTES) return
+      const bytes = yield* Effect.promise(() => response.arrayBuffer())
+      if (bytes.byteLength > MAX_ICON_BYTES) return
+      return `data:${mediaType};base64,${Buffer.from(bytes).toString("base64")}`
+    })
+
     const indexedSkill = Effect.fnUntraced(function* (input: {
       url: string
       source: MarketplaceSource
@@ -980,6 +1003,7 @@ const layer = Layer.effect(
       put,
       putJson,
       fetchResponse,
+      dataURL,
       fetcher,
       materializePlan,
       summary,

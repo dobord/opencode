@@ -2103,6 +2103,10 @@ export type MarketplaceView = {
   cache: MarketplaceCacheSummary
 }
 
+export type MarketplaceIconResult = {
+  data_url?: string
+}
+
 export type MarketplacePlanInput = {
   key: string
 }
@@ -7630,6 +7634,34 @@ export type MarketplaceRefreshResponses = {
 }
 
 export type MarketplaceRefreshResponse = MarketplaceRefreshResponses[keyof MarketplaceRefreshResponses]
+
+export type MarketplaceIconData = {
+  body?: never
+  path: {
+    key: string
+    variant: "src-light" | "src-dark"
+  }
+  query?: never
+  url: "/marketplace/icon/{key}/{variant}"
+}
+
+export type MarketplaceIconErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MarketplaceIconError = MarketplaceIconErrors[keyof MarketplaceIconErrors]
+
+export type MarketplaceIconResponses = {
+  /**
+   * Marketplace icon data
+   */
+  200: MarketplaceIconResult
+}
+
+export type MarketplaceIconResponse = MarketplaceIconResponses[keyof MarketplaceIconResponses]
 
 export type MarketplacePlanData = {
   body?: MarketplacePlanInput
