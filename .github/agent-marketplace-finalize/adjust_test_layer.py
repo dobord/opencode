@@ -5,7 +5,7 @@ text = path.read_text()
 old = "const it = testEffect(Layer.mergeAll(LayerNode.compile(Skill.node), node, testInstanceStoreLayer))"
 new = """const it = testEffect(
   Layer.mergeAll(
-    LayerNode.compile(LayerNode.group([Skill.node, MarketplaceRegistry.node])),
+    LayerNode.compile(LayerNode.group([Skill.node, Config.node, MarketplaceRegistry.node])),
     node,
     testInstanceStoreLayer,
   ),
