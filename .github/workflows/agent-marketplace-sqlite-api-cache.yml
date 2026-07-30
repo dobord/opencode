@@ -40,40 +40,42 @@ jobs:
           python3 .github/agent-marketplace-sqlite-api-cache/apply.py
           python3 - <<'PY'
           from pathlib import Path
-          build = Path('packages/sdk/js/script/build.ts')
-          text = build.read_text()
-          start_marker = '  for (const name of Object.keys(schemas)) {'
-          end_marker = '  await Bun.write("./openapi.json", JSON.stringify(document))'
-          start = text.index(start_marker, text.index('const schemas'))
-          end = text.index(end_marker, start) + len(end_marker)
-          replacement = '''  const rewriteSchemaRef = (value: unknown, from: string, to: string): void => {
-            if (Array.isArray(value)) {
-              value.forEach((item) => rewriteSchemaRef(item, from, to))
-              return
-            }
-            if (typeof value !== "object" || value === null) return
-            for (const [key, child] of Object.entries(value)) {
-              if (key === "$ref" && child === `#/components/schemas/${from}`) {
-                ;(value as Record<string, unknown>)[key] = `#/components/schemas/${to}`
-                continue
-              }
-              rewriteSchemaRef(child, from, to)
-            }
-          }
-          for (const name of Object.keys(schemas)) {
-            if (!/^SessionNext\\w+1$/.test(name)) continue
-            if (!reachable.has(name)) {
-              delete schemas[name]
-              continue
-            }
-            const original = name.slice(0, -1)
-            if (!(original in schemas)) continue
-            if (JSON.stringify(schemas[name]) !== JSON.stringify(schemas[original])) continue
-            rewriteSchemaRef(document, name, original)
-            delete schemas[name]
-          }
-          await Bun.write("./openapi.json", JSON.stringify(document))'''
-          build.write_text(text[:start] + replacement + text[end:])
+          schema = Path('packages/core/src/marketplace-schema.ts')
+          text = schema.read_text()
+          old = 'export const Profile = Schema.Unknown.annotate({ identifier: "MarketplaceProfile" })'
+          new = '''const ProfileSource = Schema.Struct({
+            id: Schema.String,
+            name: Schema.String,
+            url: Schema.String,
+            trust: Schema.optional(Trust),
+          })
+
+          const ProfilePackage = Schema.Struct({
+            key: Schema.String,
+            source: Schema.String,
+            catalog: Schema.String,
+            item: Schema.String,
+            name: Schema.String,
+            kind: Schema.String,
+            version: Schema.String,
+            enabled: Schema.Boolean,
+            components: Schema.Struct({
+              skills: Schema.Record(Schema.String, Schema.Boolean),
+              mcp: Schema.Record(Schema.String, Schema.Boolean),
+            }),
+          })
+
+          export const Profile = Schema.Struct({
+            schema: Schema.Literal("opencode.marketplace.profile/v1"),
+            name: Schema.String,
+            description: Schema.optional(Schema.String),
+            generated_at: Schema.String,
+            sources: Schema.Array(ProfileSource),
+            packages: Schema.Array(ProfilePackage),
+          }).annotate({ identifier: "MarketplaceProfile" })'''
+          if old not in text:
+              raise SystemExit('Marketplace profile schema anchor was not found')
+          schema.write_text(text.replace(old, new, 1))
           PY
           rm -rf .github/agent-marketplace-sqlite-api-cache
           rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
@@ -108,11 +110,9 @@ jobs:
           schemas = document.get('components', {}).get('schemas', {})
           for name in names:
               original = name[:-1]
-              duplicate = schemas.get(name)
-              base = schemas.get(original)
               print(f'MARKETPLACE_SCHEMA_DUPLICATE {name} base={original}')
-              print('duplicate=' + json.dumps(duplicate, sort_keys=True, separators=(',', ':'))[:4000])
-              print('base=' + json.dumps(base, sort_keys=True, separators=(',', ':'))[:4000])
+              print('duplicate=' + json.dumps(schemas.get(name), sort_keys=True, separators=(',', ':'))[:4000])
+              print('base=' + json.dumps(schemas.get(original), sort_keys=True, separators=(',', ':'))[:4000])
           PY
             exit "$status"
           fi
@@ -145,7 +145,6 @@ jobs:
             packages/app/src/components/marketplace-dialog.tsx \
             packages/app/src/context/server-sync.tsx \
             packages/tui/src/feature-plugins/system/marketplace.tsx \
-            packages/sdk/js/script/build.ts \
             packages/web/src/content/docs/marketplace.mdx \
             packages/web/src/content/docs/ru/marketplace.mdx
 
