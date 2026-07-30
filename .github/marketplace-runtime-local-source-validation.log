@@ -1,0 +1,5 @@
+## Apply implementation
+  File "/home/runner/work/opencode/opencode/.github/scripts/fix-marketplace-runtime-local-source-bootstrap.py", line 52
+    '''  const urls = marketplaceCatalogURLs(source.url)
+         ^^^^^
+SyntaxError: invalid syntax
