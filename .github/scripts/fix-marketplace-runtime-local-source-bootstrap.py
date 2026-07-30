@@ -15,24 +15,24 @@ for old, new in replacements.items():
 
 english = '''replace(
     "packages/web/src/content/docs/marketplace.mdx",
-    '\"path\": \"./skills/review\"',
-    '\"url\": \"./skills/review/\"',
+    '"path": "./skills/review"',
+    '"url": "./skills/review/"',
 )'''
 english_fixed = '''replace(
     "packages/web/src/content/docs/marketplace.mdx",
-    '\"path\": \"./skills/review\"',
-    '\"url\": \"./skills/review/\"',
+    '"path": "./skills/review"',
+    '"url": "./skills/review/"',
     count=2,
 )'''
 russian = '''replace(
     "packages/web/src/content/docs/ru/marketplace.mdx",
-    '\"path\": \"./skills/review\"',
-    '\"url\": \"./skills/review/\"',
+    '"path": "./skills/review"',
+    '"url": "./skills/review/"',
 )'''
 russian_fixed = '''replace(
     "packages/web/src/content/docs/ru/marketplace.mdx",
-    '\"path\": \"./skills/review\"',
-    '\"url\": \"./skills/review/\"',
+    '"path": "./skills/review"',
+    '"url": "./skills/review/"',
     count=2,
 )'''
 for old, new in [(english, english_fixed), (russian, russian_fixed)]:
@@ -44,7 +44,7 @@ marker = 'print("Marketplace runtime activation and local-source changes applied
 if marker not in text:
     raise RuntimeError("main bootstrap end marker is missing")
 
-hardening = r'''
+hardening = r"""
 # Local directory candidates are ordered by contract. Do not race the
 # .opencode and root catalog paths because both can legitimately exist.
 replace(
@@ -121,6 +121,6 @@ insert_before(
 ''',
 )
 
-'''
+"""
 text = text.replace(marker, hardening + marker, 1)
 path.write_text(text)
