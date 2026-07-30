@@ -42,11 +42,11 @@ jobs:
           from pathlib import Path
           build = Path('packages/sdk/js/script/build.ts')
           text = build.read_text()
-          old = '''  for (const name of Object.keys(schemas)) {
-            if (/^SessionNext\\w+1$/.test(name) && !reachable.has(name)) delete schemas[name]
-          }
-          await Bun.write("./openapi.json", JSON.stringify(document))'''
-          new = '''  const rewriteSchemaRef = (value: unknown, from: string, to: string): void => {
+          start_marker = '  for (const name of Object.keys(schemas)) {'
+          end_marker = '  await Bun.write("./openapi.json", JSON.stringify(document))'
+          start = text.index(start_marker, text.index('const schemas'))
+          end = text.index(end_marker, start) + len(end_marker)
+          replacement = '''  const rewriteSchemaRef = (value: unknown, from: string, to: string): void => {
             if (Array.isArray(value)) {
               value.forEach((item) => rewriteSchemaRef(item, from, to))
               return
@@ -73,9 +73,7 @@ jobs:
             delete schemas[name]
           }
           await Bun.write("./openapi.json", JSON.stringify(document))'''
-          if old not in text:
-              raise SystemExit('SDK duplicate-schema cleanup anchor was not found')
-          build.write_text(text.replace(old, new, 1))
+          build.write_text(text[:start] + replacement + text[end:])
           PY
           rm -rf .github/agent-marketplace-sqlite-api-cache
           rm .github/workflows/agent-marketplace-sqlite-api-cache.yml
