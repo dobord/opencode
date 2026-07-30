@@ -98,7 +98,7 @@ export const MarketplaceApi = HttpApi.make("marketplace").add(
         OpenApi.annotations({
           identifier: "marketplace.sourceAdd",
           summary: "Add Marketplace source",
-          description: "Add or replace a Marketplace catalog source.",
+          description: "Add or replace an HTTPS, Git repository, file URL, or local filesystem Marketplace source.",
         }),
       ),
       HttpApiEndpoint.patch("sourceToggle", MarketplacePaths.sourceItem, {

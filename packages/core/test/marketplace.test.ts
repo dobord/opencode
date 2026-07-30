@@ -241,6 +241,85 @@ describe("marketplace catalogs", () => {
     ).toThrow("absolute HTTP or HTTPS")
   })
 
+  test("loads a local directory catalog and resolves catalog-relative assets", async () => {
+    const source = createMarketplaceSource({ url: "file:///tmp/team-marketplace/", name: "Local team" })
+    const requests: string[] = []
+    const result = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async (input) => {
+        const url = String(input)
+        requests.push(url)
+        if (url.endsWith("/.opencode/marketplace.json")) return new Response("not found", { status: 404 })
+        return Response.json({
+          schema: "opencode.marketplace/v1",
+          id: "local",
+          name: "Local",
+          items: [
+            {
+              id: "review",
+              name: "Review",
+              description: "Local bundle",
+              kind: "bundle",
+              version: "1.0.0",
+              install: {
+                plugins: ["./plugins/review.ts"],
+                skills: {
+                  paths: ["./skills/legacy"],
+                  items: [
+                    { id: "review", name: "review", path: "./skills/review" },
+                    { id: "release", name: "release", url: "./skills/release/SKILL.md" },
+                  ],
+                },
+                instructions: ["./instructions/review.md"],
+              },
+            },
+          ],
+        })
+      },
+    })
+
+    expect(result.errors).toEqual([])
+    expect(requests).toContain("file:///tmp/team-marketplace/.opencode/marketplace.json")
+    expect(requests).toContain("file:///tmp/team-marketplace/marketplace.json")
+    expect(result.listings[0]?.item.install).toEqual({
+      plugins: ["file:///tmp/team-marketplace/plugins/review.ts"],
+      skills: {
+        urls: ["file:///tmp/team-marketplace/skills/legacy/"],
+        items: [
+          { id: "review", name: "review", url: "file:///tmp/team-marketplace/skills/review/" },
+          { id: "release", name: "release", url: "file:///tmp/team-marketplace/skills/release/SKILL.md" },
+        ],
+      },
+      instructions: ["file:///tmp/team-marketplace/instructions/review.md"],
+    })
+  })
+
+  test("rejects encoded traversal in catalog-relative local assets", async () => {
+    const source = createMarketplaceSource({ url: "file:///tmp/team-marketplace/marketplace.json" })
+    const result = await loadMarketplace({
+      config: upsertMarketplaceSource({}, source),
+      fetch: async () =>
+        Response.json({
+          schema: "opencode.marketplace/v1",
+          id: "unsafe-local",
+          name: "Unsafe local",
+          items: [
+            {
+              id: "unsafe",
+              name: "Unsafe",
+              description: "Encoded traversal",
+              kind: "plugin",
+              version: "1.0.0",
+              install: { plugins: ["./%2e%2e/escape.ts"] },
+            },
+          ],
+        }),
+    })
+
+    expect(result.listings).toEqual([])
+    expect(result.errors[0]?.message).toContain("stay inside the catalog directory")
+  })
+
   test("discovers a catalog from a Git repository URL", async () => {
     const source = createMarketplaceSource({ url: "https://git.example.test/ai/agent-marketplace.git" })
     const requests: string[] = []

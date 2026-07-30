@@ -457,11 +457,22 @@ async function fetchMarketplaceCatalog(fetcher: MarketplaceFetch, source: Market
       signal: AbortSignal.timeout(timeout),
     })
     const digest = response.headers.get("x-opencode-artifact-digest") ?? undefined
-    const catalog = resolveCatalogIcons(parseMarketplaceCatalog(await readCatalogResponse(response)), url)
+    const catalog = resolveCatalogAssets(parseMarketplaceCatalog(await readCatalogResponse(response)), url)
     return { catalog, url, digest }
   }
   const urls = marketplaceCatalogURLs(source.url)
   if (urls.length === 1) return load(urls[0]!)
+  if (new URL(urls[0]!).protocol === "file:") {
+    let lastError: unknown
+    for (const url of urls) {
+      try {
+        return await load(url)
+      } catch (error) {
+        lastError = error
+      }
+    }
+    throw lastError
+  }
   return Promise.any(urls.map(load))
 }
 
@@ -886,15 +897,20 @@ export function normalizeMarketplaceURL(value: string) {
   }
   const parsed = new URL(url)
   if (parsed.username || parsed.password) throw new Error("Marketplace source URLs cannot contain credentials")
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error("Marketplace sources must use HTTPS, HTTP, github:, or builtin:")
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:" && parsed.protocol !== "file:") {
+    throw new Error("Marketplace sources must use HTTPS, loopback HTTP, file:, github:, or builtin:")
   }
   if (parsed.protocol === "http:" && !isLoopback(parsed.hostname)) {
     throw new Error("Marketplace sources must use HTTPS; HTTP is only allowed for loopback development servers")
   }
   // Fragments are never sent to a server and make the same catalog hash to
-  // multiple source IDs, so canonicalize them away.
+  // multiple source IDs, so canonicalize them away. Local files do not use a
+  // query string either, and stripping it keeps one canonical registry key per file.
   parsed.hash = ""
+  if (parsed.protocol === "file:") {
+    parsed.search = ""
+    return parsed.href
+  }
   if (parsed.hostname === "github.com") {
     const [owner, repo, action, branch, ...parts] = parsed.pathname.split("/").filter(Boolean)
     if (!owner || !repo) throw new Error("Invalid GitHub marketplace URL")
@@ -909,8 +925,11 @@ export function normalizeMarketplaceURL(value: string) {
 
 function marketplaceCatalogURLs(value: string) {
   const source = normalizeMarketplaceURL(value)
-  if (!source.endsWith(".git")) return [source]
   const url = new URL(source)
+  if (url.protocol === "file:" && url.pathname.endsWith("/")) {
+    return [new URL(".opencode/marketplace.json", url).href, new URL("marketplace.json", url).href]
+  }
+  if (!source.endsWith(".git")) return [source]
   const repository = `${url.origin}${url.pathname.slice(0, -".git".length)}`
   if (url.hostname === "github.com") {
     const [owner, name] = url.pathname.split("/").filter(Boolean)
@@ -1387,25 +1406,100 @@ function iconAsset(value: unknown, label: string) {
   return optionalWebURL(raw, label)!
 }
 
-function resolveCatalogIcons(catalog: MarketplaceCatalog, source: string): MarketplaceCatalog {
+function resolveCatalogAssets(catalog: MarketplaceCatalog, source: string): MarketplaceCatalog {
+  const base = normalizeMarketplaceURL(source)
   return {
     ...catalog,
-    items: catalog.items.map((item) => {
-      if (!item.icon) return item
-      return {
-        ...item,
-        icon: {
-          "src-light": resolveIconAsset(item.icon["src-light"], source),
-          ...(item.icon["src-dark"] ? { "src-dark": resolveIconAsset(item.icon["src-dark"], source) } : {}),
-        },
-      }
-    }),
+    items: catalog.items.map((item) => ({
+      ...item,
+      ...(item.icon
+        ? {
+            icon: {
+              "src-light": resolveCatalogAsset(item.icon["src-light"], base, "catalog item icon"),
+              ...(item.icon["src-dark"]
+                ? { "src-dark": resolveCatalogAsset(item.icon["src-dark"], base, "catalog item icon") }
+                : {}),
+            },
+          }
+        : {}),
+      install: resolveCatalogPlan(item.install, base),
+    })),
   }
 }
 
-function resolveIconAsset(value: string, source: string) {
+function resolveCatalogPlan(plan: MarketplaceInstallPlan, source: string): MarketplaceInstallPlan {
+  const plugins = plan.plugins?.map((plugin, index) => resolveCatalogPlugin(plugin, source, index))
+  const relativeSkillPaths = (plan.skills?.paths ?? []).filter((value) => value.startsWith("./"))
+  const skillPaths = (plan.skills?.paths ?? []).filter((value) => !value.startsWith("./"))
+  const skillURLs = Array.from(
+    new Set([
+      ...(plan.skills?.urls ?? []).map((value, index) =>
+        resolveCatalogAsset(value, source, `install.skills.urls[${index}]`, true),
+      ),
+      ...relativeSkillPaths.map((value, index) =>
+        resolveCatalogAsset(value, source, `install.skills.paths[${index}]`, true),
+      ),
+    ]),
+  )
+  const skillItems = (plan.skills?.items ?? []).map((item, index) => resolveCatalogSkill(item, source, index))
+
+  return {
+    ...clone(plan),
+    ...(plugins ? { plugins } : {}),
+    ...(plan.skills
+      ? {
+          skills: {
+            ...(skillPaths.length ? { paths: skillPaths } : {}),
+            ...(skillURLs.length ? { urls: skillURLs } : {}),
+            ...(skillItems.length ? { items: skillItems } : {}),
+          },
+        }
+      : {}),
+    ...(plan.instructions
+      ? {
+          instructions: plan.instructions.map((value, index) =>
+            resolveCatalogAsset(value, source, `install.instructions[${index}]`),
+          ),
+        }
+      : {}),
+  }
+}
+
+function resolveCatalogPlugin(plugin: MarketplacePluginSpec, source: string, index: number): MarketplacePluginSpec {
+  const spec = Array.isArray(plugin) ? plugin[0] : plugin
+  const resolved = resolveCatalogAsset(spec, source, `install.plugins[${index}]`)
+  return Array.isArray(plugin) ? [resolved, clone(plugin[1])] : resolved
+}
+
+function resolveCatalogSkill(item: MarketplaceSkill, source: string, index: number): MarketplaceSkill {
+  if (item.path?.startsWith("./")) {
+    const { path: _path, ...rest } = item
+    return {
+      ...rest,
+      url: resolveCatalogAsset(item.path, source, `install.skills.items[${index}].path`, true),
+    }
+  }
+  if (!item.url) return clone(item)
+  return {
+    ...clone(item),
+    url: resolveCatalogAsset(item.url, source, `install.skills.items[${index}].url`, item.url.endsWith("/")),
+  }
+}
+
+function resolveCatalogAsset(value: string, source: string, label: string, directory = false) {
   if (!value.startsWith("./")) return value
-  return new URL(value, normalizeMarketplaceURL(source)).href
+  const pathname = value.split(/[?#]/)[0] ?? value
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    throw new Error(`${label} contains invalid URL encoding`)
+  }
+  if (value.includes("\\") || decoded.split("/").includes("..")) {
+    throw new Error(`${label} must stay inside the catalog directory`)
+  }
+  const relative = directory && !pathname.endsWith("/") ? `${pathname}/${value.slice(pathname.length)}` : value
+  return new URL(relative, source).href
 }
 
 function color(value: unknown, label: string) {
@@ -1440,7 +1534,10 @@ function identifier(value: unknown, label: string) {
 function sourceHost(value: string) {
   if (value.startsWith("builtin://")) return value.slice("builtin://".length)
   try {
-    return new URL(value).hostname
+    const url = new URL(value)
+    if (url.protocol !== "file:") return url.hostname
+    const parts = decodeURIComponent(url.pathname).split("/").filter(Boolean)
+    return parts.at(-1) ?? url.hostname
   } catch {
     return ""
   }

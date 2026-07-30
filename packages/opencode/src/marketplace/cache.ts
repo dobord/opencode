@@ -1,6 +1,7 @@
 import path from "path"
 import fsNode from "fs/promises"
 import { createHash, randomUUID } from "crypto"
+import { fileURLToPath, pathToFileURL } from "url"
 import { Context, Effect, Layer, Schema } from "effect"
 import { sql } from "drizzle-orm"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -10,6 +11,7 @@ import { Global } from "@opencode-ai/core/global"
 import type {
   MarketplaceFetch,
   MarketplaceInstallPlan,
+  MarketplacePluginSpec,
   MarketplaceSource,
   MarketplaceSkill,
 } from "@opencode-ai/core/marketplace"
@@ -161,10 +163,42 @@ function sameOriginHeaders(source: MarketplaceSource, target: string) {
   try {
     const left = new URL(source.url)
     const right = new URL(target)
+    if (!["http:", "https:"].includes(left.protocol) || !["http:", "https:"].includes(right.protocol)) {
+      return undefined
+    }
     return left.origin === right.origin ? source.headers : undefined
   } catch {
     return undefined
   }
+}
+
+function localMediaType(target: string) {
+  switch (path.extname(target).toLowerCase()) {
+    case ".json":
+      return "application/json"
+    case ".md":
+      return "text/markdown; charset=utf-8"
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+    case ".ts":
+      return "text/javascript; charset=utf-8"
+    case ".png":
+      return "image/png"
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg"
+    case ".webp":
+      return "image/webp"
+    case ".gif":
+      return "image/gif"
+    default:
+      return undefined
+  }
+}
+
+function isArtifactURL(value: string) {
+  return /^(?:https?|file):/i.test(value)
 }
 
 function readIndex(value: unknown): IndexedSkill[] {
@@ -316,7 +350,8 @@ const layer = Layer.effect(
       kind?: string
       mode?: CacheMode
     }) {
-      const url = new URL(input.url).href
+      const parsed = new URL(input.url)
+      const url = parsed.href
       const key = requestKey(url, input.headers)
       const row = (yield* db
         .all<FetchRow>(sql`SELECT * FROM marketplace_fetch WHERE key = ${key} LIMIT 1`)
@@ -331,6 +366,72 @@ const layer = Layer.effect(
             "content-length": String(hit.bytes.byteLength),
             "x-opencode-artifact-digest": row!.digest,
             "x-opencode-cache": "hit",
+          },
+        })
+      }
+
+      if (parsed.protocol === "file:") {
+        const local = yield* Effect.tryPromise({
+          try: async () => {
+            const target = fileURLToPath(parsed)
+            const [buffer, stat] = await Promise.all([fsNode.readFile(target), fsNode.stat(target)])
+            return {
+              bytes: new Uint8Array(buffer),
+              mediaType: localMediaType(target),
+              lastModified: stat.mtime.toUTCString(),
+            }
+          },
+          catch: (error) => cacheError("read local source", error),
+        }).pipe(
+          Effect.map((value) => ({ ok: true as const, value })),
+          Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+        )
+
+        if (!local.ok) {
+          if (hit && row) {
+            return new Response(hit.bytes, {
+              status: 200,
+              headers: {
+                ...(hit.mediaType ? { "content-type": hit.mediaType } : {}),
+                "content-length": String(hit.bytes.byteLength),
+                "x-opencode-artifact-digest": row.digest,
+                "x-opencode-cache": "stale",
+              },
+            })
+          }
+          return yield* local.error
+        }
+
+        const artifact = yield* put(local.value.bytes, {
+          mediaType: local.value.mediaType,
+          kind: input.kind ?? "local",
+          sourceUrl: url,
+        })
+        const now = Date.now()
+        yield* db
+          .run(
+            sql`
+            INSERT INTO marketplace_fetch (key, url, digest, etag, last_modified, status, time_fetched)
+            VALUES (${key}, ${url}, ${artifact.digest}, ${null}, ${local.value.lastModified}, ${200}, ${now})
+            ON CONFLICT(key) DO UPDATE SET
+              url = excluded.url,
+              digest = excluded.digest,
+              etag = excluded.etag,
+              last_modified = excluded.last_modified,
+              status = excluded.status,
+              time_fetched = excluded.time_fetched
+          `,
+          )
+          .pipe(Effect.orDie)
+
+        return new Response(local.value.bytes, {
+          status: 200,
+          headers: {
+            ...(local.value.mediaType ? { "content-type": local.value.mediaType } : {}),
+            "content-length": String(local.value.bytes.byteLength),
+            "last-modified": local.value.lastModified,
+            "x-opencode-artifact-digest": artifact.digest,
+            "x-opencode-cache": "miss",
           },
         })
       }
@@ -501,6 +602,28 @@ const layer = Layer.effect(
       return roots
     })
 
+    const directSkillSource = Effect.fnUntraced(function* (input: {
+      url: string
+      source: MarketplaceSource
+      prefix: string
+      name: string
+      entries: Map<string, TreeEntry>
+      digests: Set<string>
+    }) {
+      const base = input.url.endsWith("/") ? input.url : `${input.url}/`
+      const url = new URL("SKILL.md", base).href
+      const artifact = yield* fetchArtifact({
+        url,
+        headers: sameOriginHeaders(input.source, url),
+        kind: "skill-file",
+      })
+      input.digests.add(artifact.digest)
+      const root = path.posix.join(input.prefix, safeSegment(input.name))
+      const relative = path.posix.join(root, "SKILL.md")
+      input.entries.set(relative, { relative, bytes: artifact.bytes, digest: artifact.digest })
+      return [{ name: input.name, relative: root }]
+    })
+
     const directSkill = Effect.fnUntraced(function* (input: {
       item: MarketplaceSkill
       source: MarketplaceSource
@@ -508,7 +631,8 @@ const layer = Layer.effect(
       entries: Map<string, TreeEntry>
       digests: Set<string>
     }) {
-      const url = input.item.url!
+      const configured = input.item.url!
+      const url = configured.endsWith("/") ? new URL("SKILL.md", configured).href : configured
       const artifact = yield* fetchArtifact({
         url,
         headers: sameOriginHeaders(input.source, url),
@@ -530,15 +654,43 @@ const layer = Layer.effect(
       const digests = new Set<string>()
       const legacyRoots: string[] = []
       const itemRoots = new Map<string, string>()
+      const pluginRelatives = new Map<number, string>()
+
+      for (const [index, plugin] of (plan.plugins ?? []).entries()) {
+        const spec = Array.isArray(plugin) ? plugin[0] : plugin
+        if (!isArtifactURL(spec)) continue
+        const artifact = yield* fetchArtifact({
+          url: spec,
+          headers: sameOriginHeaders(source, spec),
+          kind: "plugin-file",
+        })
+        digests.add(artifact.digest)
+        const basename = safeSegment(path.posix.basename(new URL(spec).pathname) || `plugin-${index}.js`)
+        const relative = path.posix.join("plugins", `${index}-${basename}`)
+        entries.set(relative, { relative, bytes: artifact.bytes, digest: artifact.digest })
+        pluginRelatives.set(index, relative)
+      }
 
       for (const [index, url] of (plan.skills?.urls ?? []).entries()) {
+        const prefix = path.posix.join("skills", `source-${index}`)
         const roots = yield* indexedSkill({
           url,
           source,
-          prefix: path.posix.join("skills", `source-${index}`),
+          prefix,
           entries,
           digests,
-        })
+        }).pipe(
+          Effect.catch(() =>
+            directSkillSource({
+              url,
+              source,
+              prefix,
+              name: `source-${index}`,
+              entries,
+              digests,
+            }),
+          ),
+        )
         legacyRoots.push(...roots.map((root) => root.relative))
       }
 
@@ -569,7 +721,7 @@ const layer = Layer.effect(
 
       const instructionRelatives = new Map<number, string>()
       for (const [index, instruction] of (plan.instructions ?? []).entries()) {
-        if (!/^https?:\/\//i.test(instruction)) continue
+        if (!isArtifactURL(instruction)) continue
         const url = new URL(instruction).href
         const artifact = yield* fetchArtifact({
           url,
@@ -631,6 +783,15 @@ const layer = Layer.effect(
           `marketplace-materialization:${treeDigest}`,
         )
         .pipe(Effect.mapError((error) => cacheError("materialize lock", error)))
+
+      if (plan.plugins && pluginRelatives.size) {
+        plan.plugins = plan.plugins.map((plugin, index) => {
+          const relative = pluginRelatives.get(index)
+          if (!relative) return plugin
+          const spec = pathToFileURL(path.join(target, ...relative.split("/"))).href
+          return (Array.isArray(plugin) ? [spec, clone(plugin[1])] : spec) as MarketplacePluginSpec
+        })
+      }
 
       if (plan.skills) {
         const existing = plan.skills.paths ?? []

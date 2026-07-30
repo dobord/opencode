@@ -22,6 +22,7 @@ import {
 import { exportMarketplaceProfile } from "@opencode-ai/core/marketplace-profile"
 import { Config } from "@/config/config"
 import * as MarketplaceRegistry from "@/marketplace/registry"
+import { resolveMarketplaceSourceReference } from "@/marketplace/source"
 
 type Spin = {
   start: (msg: string) => void
@@ -262,11 +263,15 @@ const PluginMarketplaceAddCommand = effectCmd({
   handler: Effect.fn("Cli.plugin.marketplace.add")(function* (args) {
     const config = yield* Config.Service
     const registry = yield* MarketplaceRegistry.Service
-    const source = createMarketplaceSource({
-      url: String(args.url),
-      name: args.name ? String(args.name) : undefined,
-      trust: args.trust as MarketplaceConfiguredTrust,
-    })
+    const resolved = yield* Effect.promise(() => resolveMarketplaceSourceReference(String(args.url)))
+    const source = {
+      ...createMarketplaceSource({
+        url: resolved.url,
+        name: args.name ? String(args.name) : resolved.name,
+        trust: args.trust as MarketplaceConfiguredTrust,
+      }),
+      reference: resolved.reference,
+    }
     const current = yield* registry.read()
     const next = upsertMarketplaceSource({ marketplace: current } as MarketplaceHostConfig, source).marketplace!
     const result = yield* registry.replace(next).pipe(Effect.orDie)

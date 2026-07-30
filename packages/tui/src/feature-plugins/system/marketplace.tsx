@@ -461,7 +461,7 @@ function Sources(props: { api: TuiPluginApi }) {
   let current: string | undefined
 
   async function add() {
-    const raw = await prompt(props.api, "Add marketplace catalog", "URL or github:owner/repository")
+    const raw = await prompt(props.api, "Add marketplace catalog", "URL, file URL, or local path")
     const data = view()
     if (!raw?.trim() || !data) {
       showSources(props.api)
