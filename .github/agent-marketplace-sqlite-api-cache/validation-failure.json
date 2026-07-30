@@ -1,6 +1,6 @@
 {
-  "head": "e0514387ece35e66742cd51cf44d14b1cdd7c51d",
-  "run_id": "30519517862",
+  "head": "5bab031541e7416a25fcecea9d010747b6ac23fa",
+  "run_id": "30522339880",
   "apply": "success",
   "setup": "success",
   "migration": "success",
@@ -8,6 +8,6 @@
   "format": "success",
   "tests": "success",
   "typecheck": "failure",
-  "httpapi": "failure",
+  "httpapi": "success",
   "verify": "success"
 }
