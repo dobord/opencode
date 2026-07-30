@@ -1,6 +1,5 @@
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { EffectBridge } from "@/effect/bridge"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { RootHttpApi } from "../api"
 import { Service as MarketplaceService } from "@/marketplace/service"
@@ -8,14 +7,11 @@ import { Service as MarketplaceService } from "@/marketplace/service"
 export const marketplaceHandlers = HttpApiBuilder.group(RootHttpApi, "marketplace", (handlers) =>
   Effect.gen(function* () {
     const marketplace = yield* MarketplaceService
-    const bridge = yield* EffectBridge.make()
 
-    const runtime = <T extends { ok: boolean; changed?: boolean }>(result: T) => {
-      if (result.ok && result.changed) {
-        bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
-      }
-      return result
-    }
+    const runtime = <T extends { ok: boolean; changed?: boolean }>(result: T) =>
+      result.ok && result.changed
+        ? disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }).pipe(Effect.as(result))
+        : Effect.succeed(result)
 
     return handlers
       .handle("get", () => marketplace.get())
@@ -29,7 +25,7 @@ export const marketplaceHandlers = HttpApiBuilder.group(RootHttpApi, "marketplac
             force: ctx.payload.force,
             acceptUntrusted: ctx.payload.accept_untrusted,
           })
-          .pipe(Effect.map(runtime)),
+          .pipe(Effect.flatMap(runtime)),
       )
       .handle("updateAll", (ctx) =>
         marketplace
@@ -38,7 +34,7 @@ export const marketplaceHandlers = HttpApiBuilder.group(RootHttpApi, "marketplac
             force: ctx.payload.force,
             acceptUntrusted: ctx.payload.accept_untrusted,
           })
-          .pipe(Effect.map(runtime)),
+          .pipe(Effect.flatMap(runtime)),
       )
       .handle("uninstall", (ctx) =>
         marketplace
@@ -46,7 +42,7 @@ export const marketplaceHandlers = HttpApiBuilder.group(RootHttpApi, "marketplac
             key: ctx.params.key,
             expectedRevision: ctx.payload.expected_revision,
           })
-          .pipe(Effect.map(runtime)),
+          .pipe(Effect.flatMap(runtime)),
       )
       .handle("toggle", (ctx) =>
         marketplace
@@ -57,7 +53,7 @@ export const marketplaceHandlers = HttpApiBuilder.group(RootHttpApi, "marketplac
             id: ctx.payload.id,
             enabled: ctx.payload.enabled,
           })
-          .pipe(Effect.map(runtime)),
+          .pipe(Effect.flatMap(runtime)),
       )
       .handle("sourceAdd", (ctx) =>
         marketplace.sourceAdd({

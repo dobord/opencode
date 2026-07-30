@@ -31,6 +31,7 @@ import { Config } from "@/config/config"
 import { composeMarketplaceConfig } from "./overlay"
 import * as MarketplaceRegistry from "./registry"
 import * as MarketplaceCache from "./cache"
+import { resolveMarketplaceSourceReference } from "./source"
 
 export type InstallInput = {
   key: string
@@ -151,7 +152,12 @@ function trusted(source: MarketplaceSource) {
 function sourceHeaders(source: MarketplaceSource, target: string) {
   if (!source.headers) return undefined
   try {
-    return new URL(source.url).origin === new URL(target).origin ? source.headers : undefined
+    const left = new URL(source.url)
+    const right = new URL(target)
+    if (!["http:", "https:"].includes(left.protocol) || !["http:", "https:"].includes(right.protocol)) {
+      return undefined
+    }
+    return left.origin === right.origin ? source.headers : undefined
   } catch {
     return undefined
   }
@@ -317,13 +323,14 @@ const layer = Layer.effect(
       if (input.listing.catalog_digest) artifactDigests.add(input.listing.catalog_digest)
 
       for (const icon of Object.values(input.listing.item.icon ?? {})) {
-        if (!/^https?:\/\//i.test(icon)) continue
+        if (!/^(?:https?|file):/i.test(icon)) continue
         yield* cache
           .fetchResponse({
             url: icon,
             headers: sourceHeaders(input.listing.source, icon),
             kind: "icon",
             mode: "refresh",
+            source: input.listing.source,
           })
           .pipe(
             Effect.tap((response) =>
@@ -552,12 +559,16 @@ const layer = Layer.effect(
       if ((state.revision ?? 0) !== input.expectedRevision) {
         return revisionFailure(input.expectedRevision, state.revision ?? 0)
       }
-      const source = createMarketplaceSource({
-        url: input.url,
-        name: input.name,
-        trust: input.trust,
-        headers: input.headers,
-      })
+      const resolved = yield* Effect.promise(() => resolveMarketplaceSourceReference(input.url))
+      const source = {
+        ...createMarketplaceSource({
+          url: resolved.url,
+          name: input.name ?? resolved.name,
+          trust: input.trust,
+          headers: resolved.local ? undefined : input.headers,
+        }),
+        reference: resolved.reference,
+      }
       const next = upsertMarketplaceSource({ marketplace: state }, source).marketplace ?? state
       return yield* persist({ state: next })
     })

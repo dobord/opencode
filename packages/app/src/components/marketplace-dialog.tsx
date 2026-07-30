@@ -701,8 +701,8 @@ function Sources(props: {
           appearance="base"
           value={props.sourceURL}
           onInput={(event) => props.setURL(event.currentTarget.value)}
-          placeholder="https://… or github:owner/repository"
-          aria-label="Marketplace source URL"
+          placeholder="HTTPS, github:owner/repository, or local path"
+          aria-label="Marketplace source URL or local path"
           spellcheck={false}
           autocorrect="off"
           autocomplete="off"
