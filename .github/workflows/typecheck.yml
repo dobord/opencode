@@ -138,7 +138,7 @@ jobs:
           (cd packages/opencode && bun test --timeout 30000 test/marketplace/*.test.ts test/config/config.test.ts test/server/httpapi-global.test.ts test/server/httpapi-control-plane.test.ts)
 
       - name: Typecheck affected packages
-        id: affected-typecheck
+        id: affected_typecheck
         if: always() && steps.tests.outcome == 'success'
         continue-on-error: true
         shell: bash
@@ -152,7 +152,7 @@ jobs:
 
       - name: Validate Marketplace HTTP API
         id: httpapi
-        if: ${{ always() && steps['affected-typecheck'].outcome == 'success' }}
+        if: always() && steps.affected_typecheck.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -181,7 +181,7 @@ jobs:
           SDK_OUTCOME: ${{ steps.sdk.outcome }}
           FORMAT_OUTCOME: ${{ steps.format.outcome }}
           TESTS_OUTCOME: ${{ steps.tests.outcome }}
-          TYPECHECK_OUTCOME: ${{ steps['affected-typecheck'].outcome }}
+          TYPECHECK_OUTCOME: ${{ steps.affected_typecheck.outcome }}
           HTTPAPI_OUTCOME: ${{ steps.httpapi.outcome }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: |
