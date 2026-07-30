@@ -1,0 +1,13 @@
+{
+  "head": "a416482fd19b1fac610608e2dabb2f319cc2b4e0",
+  "run_id": "30517004032",
+  "apply": "success",
+  "setup": "success",
+  "migration": "success",
+  "sdk": "success",
+  "format": "success",
+  "tests": "success",
+  "typecheck": "failure",
+  "httpapi": "skipped",
+  "verify": "skipped"
+}
