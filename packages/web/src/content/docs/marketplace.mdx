@@ -1,53 +1,151 @@
 ---
 title: Marketplace
-description: Publish, install, and control OpenCode plugins, skills, and MCP servers.
+description: Install and manage plugins, skills, agents, commands, MCP servers, and reusable bundles without editing opencode.json.
 ---
 
-The Marketplace installs related plugins, skills, MCP servers, commands, agents, and instructions as one managed
+Marketplace distributes related plugins, skills, agents, commands, MCP servers, and instruction files as one managed
 package. Open **Settings → Marketplace** in the desktop app, or run **Marketplace** from the TUI command palette.
 
-An installed package can remain installed while it is disabled. You can also enable or disable each declared skill
-and MCP server independently.
+A package may remain installed while disabled. Named skills and MCP servers can also be enabled or disabled
+independently.
 
-Marketplace sources, installed-package state, and component switches are stored in OpenCode's local application
-registry, not in `opencode.json` or `opencode.jsonc`. The active install plans are projected into the effective
-configuration in memory. Installing, updating, disabling, or removing a package therefore leaves the user's config
-file unchanged.
-
-Run `opencode plugin marketplace export --name team` to export the installed set as a portable profile. Source
-request headers, installation receipts, and other local implementation state are omitted from the export.
+> Marketplace operations do not write Marketplace state or generated component entries to `opencode.json` or
+> `opencode.jsonc`.
 
 ---
 
-## Add a catalog
+## State and runtime model
 
-Open the **Sources** tab in the desktop app. In the TUI, open **Marketplace sources** or press `Ctrl+S` from the
-Marketplace.
+OpenCode separates three kinds of state:
 
-You can also add a source without opening the TUI:
+1. **User configuration** remains in `opencode.json` or `opencode.jsonc`.
+2. **Marketplace application state** is stored in the OpenCode SQLite database.
+3. **Effective runtime configuration** is assembled in memory from the user configuration and active Marketplace
+   install plans.
+
+The SQLite registry stores catalog sources, installed packages, component switches, artifact references, and a
+monotonic revision. Active plans are projected into the runtime `plugin`, `skills`, `agent`, `command`, `mcp`, and
+`instructions` fields only while OpenCode is running.
+
+When user configuration is saved, OpenCode removes unchanged Marketplace projections before writing the file. A value
+that the user changed is retained as user-owned configuration. If multiple active packages provide the same logical
+resource, the later provider wins; disabling or uninstalling it exposes the next provider without reconstructing a
+chain of config-file edits.
+
+Every registry mutation uses the revision observed by the client. A stale desktop or TUI client receives a revision
+conflict instead of silently overwriting newer state.
+
+---
+
+## Use Marketplace
+
+The desktop app provides **Discover**, **Installed**, **Updates**, and **Sources** views. The item details panel shows
+publisher and provenance information, requested capabilities, setup notes, conflicts, and component switches.
+
+In the TUI:
+
+- run **Marketplace** from the command palette to browse and manage packages;
+- run **Marketplace sources**, or press `Ctrl+S` from Marketplace, to manage catalogs;
+- press `Enter` on an installed item to manage its components;
+- press `Space` in the package list to enable or disable the complete package;
+- press `Ctrl+D` in the component view to uninstall it.
+
+### Add a catalog
+
+Add a source from the **Sources** view or with the CLI:
 
 ```bash
 opencode plugin marketplace add https://git.example.com/ai/agent-marketplace.git
 ```
 
-A source can be:
+A source may be:
 
 - an HTTPS URL to a Marketplace JSON file;
 - a GitHub repository URL;
 - `github:owner/repository`;
 - an HTTP loopback URL for local development.
 
-For Git repository URLs ending in `.git`, OpenCode looks for `.opencode/marketplace.json` through the conventional
-GitHub, GitLab, and Gitea raw-file routes. You can pass `--name` to set a display name or `--trust private` for a
-private catalog.
+For Git repository URLs ending in `.git`, OpenCode looks for `.opencode/marketplace.json` through conventional GitHub,
+GitLab, and Gitea raw-file routes. Use `--name` to set a display name and `--trust private` for a private catalog.
 
-OpenCode preserves installation receipts even if a source is disabled, unavailable, or removes an item. This lets
-you safely manage or uninstall an existing package.
+Catalogs are labelled `official`, `verified`, `community`, or `private`. Official and verified provenance is reserved
+for catalogs distributed by OpenCode; user-added catalogs can be community or private. The label does not sandbox
+installed code.
 
-Catalogs are labelled `official`, `verified`, `community`, or `private`. Official and verified provenance is
-reserved for catalogs distributed by OpenCode; user-added catalogs can be community or private. The label does not
-sandbox installed code. Private sources can include request headers in `marketplace.sources`; keep credentials out
-of project configuration.
+Private source headers are stored only in the local SQLite registry. They are redacted from API responses and exported
+profiles, are never written to project configuration, and are forwarded to subresources only when the target has the
+same origin as the source.
+
+Installed packages remain manageable when their source is disabled, removed, offline, or no longer publishes the
+item. OpenCode uses the local package snapshot and materialized artifacts for the installed view and uninstall flow.
+
+---
+
+## Install and update lifecycle
+
+Installation is split into planning and execution:
+
+1. **Plan** reports trust warnings, requested capabilities, and configuration conflicts.
+2. **Materialize** downloads remote skills and instructions, validates their structure, and creates immutable local
+   artifacts.
+3. **Commit** stores the package and artifact references in one revision-checked registry mutation.
+4. **Activate** invalidates the effective configuration and connects newly enabled MCP servers.
+
+Community and private catalogs require explicit trust acceptance. Conflicting plugin, agent, command, or MCP providers
+require explicit confirmation before installation.
+
+Updates compare semantic versions when possible and also detect changed item fingerprints. **Update all** does not
+perform an implicit semantic-version downgrade. Existing component choices are retained when the updated package still
+declares those components.
+
+### Enable and disable components
+
+Disabling a package removes its active plan from runtime while keeping the installation and per-component choices.
+Re-enabling it restores all components that were not disabled individually.
+
+An explicitly disabled MCP server remains disabled when the complete package is turned off and on. Enabling its own
+switch makes it eligible for automatic connection again.
+
+Uninstall removes the package provider from the registry and recomputes the effective overlay. User-modified values are
+preserved; shared resources fall back to the next active provider.
+
+---
+
+## Content-addressed artifact cache
+
+Marketplace stores catalog responses, item manifests, icons, remote skill files, and remote instruction files by their
+SHA-256 digest in the OpenCode cache directory. Identical bytes are stored once, even when referenced by multiple
+packages or sources.
+
+Remote skill and instruction content is materialized into immutable local trees before activation. Relative paths are
+validated so an artifact cannot escape its materialization root.
+
+Refresh requests use `ETag` and `Last-Modified` when a source provides them. If the network request fails, OpenCode can
+use the last successfully validated cached response. Installed artifact digests are retained during cache pruning.
+
+The desktop app and TUI expose cache statistics and pruning. The API also provides `POST /marketplace/cache/prune`.
+
+---
+
+## Export a portable profile
+
+Export the current package set to a file:
+
+```bash
+opencode plugin marketplace export marketplace-team.json --name team
+```
+
+Omit the file to print JSON to stdout:
+
+```bash
+opencode plugin marketplace export --name team
+```
+
+The `opencode.marketplace.profile/v1` profile contains sources, package coordinates, versions, package state, and skill
+and MCP switches. Entries are stably sorted. Source headers, credentials, internal plans, cache paths, artifact
+metadata, and installation bookkeeping are excluded.
+
+Profile import is not part of this change; the exported format is the portable contract for a later apply/import flow.
 
 ---
 
@@ -105,11 +203,11 @@ A catalog uses the `opencode.marketplace/v1` schema:
 }
 ```
 
-Use a stable, colon-free identifier for the catalog, each item, and each skill.
+Use stable, colon-free identifiers for the catalog, each item, and each named skill.
 
-### Plugin icons
+### Icons
 
-Each item can have its own arbitrary image. For one image, use the short form:
+An item may use a single image:
 
 ```json
 {
@@ -117,34 +215,21 @@ Each item can have its own arbitrary image. For one image, use the short form:
 }
 ```
 
-To provide theme-specific artwork, use `src-light` and optionally `src-dark`:
-
-```json
-{
-  "icon": {
-    "src-light": "./assets/review-suite-light.png",
-    "src-dark": "./assets/review-suite-dark.png"
-  }
-}
-```
-
-Icon values can be a `./` path relative to the catalog file, an absolute HTTP or HTTPS URL, or a base64 PNG, JPEG,
-WebP, or GIF data URL. Relative paths must stay inside the catalog directory. If an image is missing or cannot be
-loaded, the desktop app displays a colored initial-based fallback. `brand_color` accepts a six-digit hex color for
-that fallback and the icon background.
+For theme-specific artwork, use `src-light` and optionally `src-dark`. Icon values may be a `./` path relative to the
+catalog file, an absolute HTTP or HTTPS URL, or a base64 PNG, JPEG, WebP, or GIF data URL. Relative paths must remain
+inside the catalog directory. `brand_color` accepts a six-digit hex color for the fallback background.
 
 ### Individually controlled skills
 
-Declare skills under `install.skills.items` so the GUI and TUI can show a named switch for each one. Each item needs
-an `id` and the actual skill `name`; it can point to a dedicated `path` or `url`. Multiple skills may share a source.
-When a named skill is disabled, OpenCode also filters it from runtime skill discovery.
+Declare named skills under `install.skills.items`. Each item requires an `id` and the actual skill `name`, and may point
+to a dedicated `path` or `url`. Multiple skills may share a source.
 
-Legacy `install.skills.paths` and `install.skills.urls` arrays remain supported. Each unlabelled source appears as
-one switch derived from its path or URL.
+Legacy `install.skills.paths` and `install.skills.urls` arrays remain supported. Each source without metadata appears as
+one component derived from its path or URL.
 
 ### Other install-plan fields
 
-An install plan can also define:
+An install plan may also define:
 
 - `plugins`: package strings or `[package, options]` tuples accepted by the `plugin` configuration field;
 - `agents`: named agent and subagent configuration;
@@ -152,44 +237,35 @@ An install plan can also define:
 - `mcp`: named local or remote MCP server configuration;
 - `instructions`: persistent instruction paths or URLs.
 
-Before an install replaces an existing plugin, agent, command, or MCP server, OpenCode shows the conflicting paths
-and requires confirmation.
+---
+
+## Dedicated Marketplace API
+
+Desktop and TUI clients use the domain API instead of replacing the global configuration object:
+
+```text
+GET    /marketplace
+POST   /marketplace/refresh
+POST   /marketplace/plan
+POST   /marketplace/install
+POST   /marketplace/update-all
+DELETE /marketplace/install/{key}
+PATCH  /marketplace/install/{key}
+POST   /marketplace/source
+PATCH  /marketplace/source/{id}
+DELETE /marketplace/source/{id}
+POST   /marketplace/profile
+POST   /marketplace/cache/prune
+```
+
+Registry mutations accept `expected_revision`. Public responses omit source headers, materialized plans, internal
+artifact references, and other machine-local state.
 
 ---
 
-## Enable and disable components
-
-The desktop details panel contains switches for the complete plugin, every declared skill, and every MCP server.
-
-In the TUI:
-
-- press `Enter` on an installed item to manage its components;
-- press `Space` in the Marketplace list to enable or disable the whole plugin;
-- press `Enter` on a component to toggle it;
-- press `Ctrl+D` in the component view to uninstall the package.
-
-Disabling the complete plugin removes its active configuration but keeps the installation receipt and individual
-choices. Enabling it restores the plugin and all skills that were not disabled individually.
-
-Enabled MCP servers start automatically when the plugin is enabled. If you explicitly disable an MCP server, that
-choice is remembered: toggling the complete plugin off and on does not start that server. Enabling the MCP switch
-again makes it eligible for automatic startup.
-
-Uninstalling restores previous values recorded by the installation receipt. Values changed by the user after
-installation are preserved rather than overwritten.
-
-## Updates and unavailable catalogs
-
-Marketplace updates use the same receipt mechanism as installation. OpenCode compares semantic versions when
-possible and also detects changed item fingerprints. A catalog cannot turn **Update all** into an implicit
-downgrade: a lower semantic version remains installed.
-
-Installed items remain visible and removable when their source is disabled, deleted, offline, or no longer
-publishes the item. OpenCode reconstructs the entry from its local receipt and snapshot.
-
 ## Security
 
-Marketplace is a discovery and configuration mechanism, not a sandbox.
+Marketplace is a discovery, materialization, and configuration mechanism, not a sandbox.
 
 - Plugins execute code inside OpenCode.
 - Local MCP servers execute commands on your machine.
@@ -197,5 +273,11 @@ Marketplace is a discovery and configuration mechanism, not a sandbox.
 - Skills and instructions influence agent behavior.
 - Agents and commands can change model, tool, and permission configuration.
 
-Review the publisher, source, repository, requested capabilities, and resulting configuration before installation.
-Prefer trusted catalogs for executable plugins and pin package versions when reproducibility matters.
+Review the publisher, source, repository, requested capabilities, and planned configuration before installation. Prefer
+trusted catalogs for executable plugins and pin package versions when reproducibility matters.
+
+## Pre-release migration policy
+
+Marketplace has not shipped with the intermediate storage formats used during development. OpenCode creates the final
+Marketplace tables through the normal database schema migration and intentionally does **not** import experimental
+`registry.json` files or Marketplace fields written to configuration by earlier feature-branch commits.

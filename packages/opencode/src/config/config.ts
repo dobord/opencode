@@ -111,11 +111,12 @@ async function resolveLoadedPlugins<T extends { plugin?: ConfigPluginV1.Spec[] }
   return config
 }
 
-type Info = ConfigV1.Info & {
-  // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
-  // with the file and scope it came from so later runtime code can make location-sensitive decisions.
-  plugin_origins?: ConfigPlugin.Origin[]
-}
+type Info = ConfigV1.Info &
+  Pick<MarketplaceHostConfig, "marketplace"> & {
+    // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
+    // with the file and scope it came from so later runtime code can make location-sensitive decisions.
+    plugin_origins?: ConfigPlugin.Origin[]
+  }
 
 type State = {
   config: Info
@@ -127,6 +128,7 @@ type State = {
 export interface Interface {
   readonly get: () => Effect.Effect<Info>
   readonly getGlobal: () => Effect.Effect<Info>
+  readonly getGlobalBase: () => Effect.Effect<Info>
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
@@ -167,15 +169,7 @@ function replaceJsonc(input: string, path: string[], value: unknown) {
   )
 }
 
-const MARKETPLACE_MANAGED_CONFIG_KEYS = [
-  "plugin",
-  "skills",
-  "agent",
-  "command",
-  "mcp",
-  "instructions",
-  "marketplace",
-] as const
+const MARKETPLACE_MANAGED_CONFIG_KEYS = ["plugin", "skills", "agent", "command", "mcp", "instructions"] as const
 
 function mergeGlobalConfig(existing: Info, patch: Info, replaceManaged = false) {
   const merged = mergeDeep(existing, patch) as Info
@@ -200,7 +194,7 @@ function patchGlobalJsonc(input: string, patch: Info, replaceManaged = false) {
 }
 
 function writable(info: Info) {
-  const { plugin_origins: _plugin_origins, ...next } = info
+  const { plugin_origins: _pluginOrigins, marketplace: _marketplace, ...next } = info
   return next
 }
 
@@ -337,6 +331,10 @@ const layer = Layer.effect(
 
     const getGlobal = Effect.fn("Config.getGlobal")(function* () {
       return yield* cachedGlobal
+    })
+
+    const getGlobalBase = Effect.fn("Config.getGlobalBase")(function* () {
+      return yield* loadGlobalRaw()
     })
 
     const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {
@@ -682,67 +680,40 @@ const layer = Layer.effect(
     })
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
-      const requestedState = (config as MarketplaceHostConfig).marketplace
-      if (requestedState) {
-        const file = globalConfigFile()
-        const before = (yield* readConfigFile(file)) ?? "{}"
-        const raw = yield* loadGlobalRaw()
-        const currentState = yield* marketplace.read()
-        const current = composeMarketplaceConfig(raw as MarketplaceHostConfig, currentState) as Info
-        const incoming = mergeGlobalConfig(current, config, true)
-        const stored = yield* marketplace.replace(requestedState).pipe(Effect.orDie)
-        incoming.marketplace = stored.state
-
-        const desired = decomposeMarketplaceConfig(
-          incoming as MarketplaceHostConfig,
-          raw as MarketplaceHostConfig,
-          stored.state,
-        ) as Info
-        const patch = writableGlobal(desired)
-        const rawChanged = !isDeepStrictEqual(writableGlobal(raw), patch)
-
-        if (rawChanged) {
-          if (!file.endsWith(".jsonc")) {
-            yield* fs.writeFileString(file, JSON.stringify(patch, null, 2)).pipe(Effect.orDie)
-          } else {
-            const updated = patchGlobalJsonc(before, patch, true)
-            if (updated !== before) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
-          }
-        }
-
-        const changed = rawChanged || stored.changed
-        const next = composeMarketplaceConfig(patch as MarketplaceHostConfig, stored.state) as Info
-        if (changed) yield* invalidate()
-        return { info: next, changed }
-      }
-
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
-      const patch = writableGlobal(config)
+      const raw = yield* loadGlobalRaw()
+      const state = yield* marketplace.read()
+      const effective = composeMarketplaceConfig(raw as MarketplaceHostConfig, state) as Info
+      const incoming = mergeGlobalConfig(effective, config, false)
+      const desired = decomposeMarketplaceConfig(
+        incoming as MarketplaceHostConfig,
+        raw as MarketplaceHostConfig,
+        state,
+      ) as Info
+      const patch = writableGlobal(desired)
+      const changed = !isDeepStrictEqual(writableGlobal(raw), patch)
 
-      let next: Info
-      let changed: boolean
-      if (!file.endsWith(".jsonc")) {
-        const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeGlobalConfig(writable(existing), patch, false)
-        const serialized = JSON.stringify(merged, null, 2)
-        changed = serialized !== before
-        if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
-        next = merged
-      } else {
-        const updated = patchGlobalJsonc(before, patch, false)
-        next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
-        changed = updated !== before
-        if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+      if (changed) {
+        if (!file.endsWith(".jsonc")) {
+          yield* fs.writeFileString(file, JSON.stringify(patch, null, 2)).pipe(Effect.orDie)
+        } else {
+          const updated = patchGlobalJsonc(before, patch, true)
+          if (updated !== before) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+        }
+        yield* invalidate()
       }
 
-      if (changed) yield* invalidate()
-      return { info: next, changed }
+      return {
+        info: composeMarketplaceConfig(patch as MarketplaceHostConfig, state) as Info,
+        changed,
+      }
     })
 
     return Service.of({
       get,
       getGlobal,
+      getGlobalBase,
       getConsoleState,
       update,
       updateGlobal,

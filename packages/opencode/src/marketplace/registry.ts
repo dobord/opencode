@@ -1,23 +1,11 @@
-import path from "path"
-import { randomUUID } from "crypto"
 import { isDeepStrictEqual } from "util"
 import { Context, Effect, Layer, Schema } from "effect"
+import { sql } from "drizzle-orm"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Global } from "@opencode-ai/core/global"
-import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
-import { ConfigMarketplaceV1 } from "@opencode-ai/core/v1/config/marketplace"
-import type { MarketplaceState } from "@opencode-ai/core/marketplace"
+import { Database } from "@opencode-ai/core/database/database"
+import type { MarketplaceInstalled, MarketplaceSource, MarketplaceState } from "@opencode-ai/core/marketplace"
 
-const FILE_SCHEMA = "opencode.marketplace.registry/v1" as const
-
-const RegistryFile = Schema.Struct({
-  schema: Schema.Literal(FILE_SCHEMA),
-  revision: Schema.Number,
-  state: ConfigMarketplaceV1.Info,
-})
-
-type RegistryFile = Schema.Schema.Type<typeof RegistryFile>
+const REGISTRY_ID = 1
 
 export class ConflictError extends Schema.TaggedErrorClass<ConflictError>()("MarketplaceRegistryConflictError", {
   expected: Schema.Number,
@@ -28,11 +16,6 @@ export class ConflictError extends Schema.TaggedErrorClass<ConflictError>()("Mar
   }
 }
 
-export class CorruptError extends Schema.TaggedErrorClass<CorruptError>()("MarketplaceRegistryCorruptError", {
-  file: Schema.String,
-  message: Schema.String,
-}) {}
-
 export type ReplaceResult = {
   state: MarketplaceState
   changed: boolean
@@ -41,84 +24,129 @@ export type ReplaceResult = {
 export interface Interface {
   readonly read: () => Effect.Effect<MarketplaceState>
   readonly replace: (state: MarketplaceState) => Effect.Effect<ReplaceResult, ConflictError>
-  readonly file: () => string
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/MarketplaceRegistry") {}
 
-function normalize(state: MarketplaceState) {
-  const { revision: _revision, ...value } = state
-  return JSON.parse(JSON.stringify(value)) as Omit<MarketplaceState, "revision">
+type Executor = Pick<Database.Interface["db"], "all" | "run">
+
+function parseJson<T>(value: unknown): T {
+  if (typeof value === "string") return JSON.parse(value) as T
+  return structuredClone(value) as T
 }
 
-function view(file: RegistryFile): MarketplaceState {
-  const state = structuredClone(file.state) as MarketplaceState
-  return { ...state, revision: file.revision }
+function normalize(state: MarketplaceState): Omit<MarketplaceState, "revision"> {
+  const value: Omit<MarketplaceState, "revision"> = {}
+  if (state.sources !== undefined) value.sources = structuredClone(state.sources)
+  if (state.installed !== undefined) value.installed = structuredClone(state.installed)
+  return JSON.parse(JSON.stringify(value)) as Omit<MarketplaceState, "revision">
 }
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const fs = yield* FSUtil.Service
-    const flock = yield* EffectFlock.Service
-    const decode = Schema.decodeUnknownSync(RegistryFile)
-    const file = () => path.join(Global.Path.data, "marketplace", "registry.json")
+    const { db } = yield* Database.Service
 
-    const readUnsafe = Effect.fnUntraced(function* () {
-      const target = file()
-      const text = yield* fs.readFileStringSafe(target).pipe(Effect.orDie)
-      if (!text) return { schema: FILE_SCHEMA, revision: 0, state: {} }
-      return yield* Effect.try({
-        try: () => decode(JSON.parse(text)),
-        catch: (error) =>
-          new CorruptError({
-            file: target,
-            message: error instanceof Error ? error.message : String(error),
-          }),
-      }).pipe(Effect.orDie)
+    const readFrom = Effect.fnUntraced(function* (executor: Executor) {
+      const now = Date.now()
+      yield* executor
+        .run(
+          sql`INSERT OR IGNORE INTO marketplace_registry (id, revision, time_updated)
+              VALUES (${REGISTRY_ID}, 0, ${now})`,
+        )
+        .pipe(Effect.orDie)
+
+      const meta = (yield* executor
+        .all<{ revision: number }>(sql`SELECT revision FROM marketplace_registry WHERE id = ${REGISTRY_ID} LIMIT 1`)
+        .pipe(Effect.orDie))[0]
+
+      const sourceRows = yield* executor
+        .all<{ data: unknown }>(sql`SELECT data FROM marketplace_source ORDER BY position ASC, id ASC`)
+        .pipe(Effect.orDie)
+      const installRows = yield* executor
+        .all<{
+          key: string
+          data: unknown
+        }>(sql`SELECT key, data FROM marketplace_install ORDER BY position ASC, key ASC`)
+        .pipe(Effect.orDie)
+
+      const sources = sourceRows.map((row) => parseJson<MarketplaceSource>(row.data))
+      const installed = Object.fromEntries(
+        installRows.map((row) => [row.key, parseJson<MarketplaceInstalled>(row.data)] as const),
+      )
+
+      return {
+        revision: meta?.revision ?? 0,
+        ...(sources.length ? { sources } : {}),
+        ...(installRows.length ? { installed } : {}),
+      } satisfies MarketplaceState
     })
 
     const read = Effect.fn("MarketplaceRegistry.read")(function* () {
-      return view(yield* readUnsafe())
+      return yield* readFrom(db)
     })
 
     const replace = Effect.fn("MarketplaceRegistry.replace")(function* (state: MarketplaceState) {
-      const target = file()
-      return yield* flock
-        .withLock(
+      return yield* db
+        .transaction((tx) =>
           Effect.gen(function* () {
-            const current = yield* readUnsafe()
+            const current = yield* readFrom(tx as unknown as Executor)
             const desired = normalize(state)
-            if (isDeepStrictEqual(current.state, desired)) return { state: view(current), changed: false }
+            const existing = normalize(current)
+            if (isDeepStrictEqual(existing, desired)) return { state: current, changed: false }
 
             const expected = state.revision ?? 0
-            if (expected !== current.revision) {
-              return yield* new ConflictError({ expected, actual: current.revision })
+            const actual = current.revision ?? 0
+            if (expected !== actual) return yield* new ConflictError({ expected, actual })
+
+            const now = Date.now()
+            const revision = actual + 1
+            yield* tx
+              .run(
+                sql`UPDATE marketplace_registry
+                  SET revision = ${revision}, time_updated = ${now}
+                  WHERE id = ${REGISTRY_ID}`,
+              )
+              .pipe(Effect.orDie)
+            yield* tx.run(sql`DELETE FROM marketplace_source`).pipe(Effect.orDie)
+            yield* tx.run(sql`DELETE FROM marketplace_install`).pipe(Effect.orDie)
+
+            for (const [position, source] of (desired.sources ?? []).entries()) {
+              yield* tx
+                .run(
+                  sql`INSERT INTO marketplace_source (id, data, position, time_created, time_updated)
+                    VALUES (${source.id}, ${JSON.stringify(source)}, ${position}, ${now}, ${now})`,
+                )
+                .pipe(Effect.orDie)
             }
 
-            const next: RegistryFile = {
-              schema: FILE_SCHEMA,
-              revision: current.revision + 1,
-              state: desired,
+            for (const [position, [key, installed]] of Object.entries(desired.installed ?? {}).entries()) {
+              yield* tx
+                .run(
+                  sql`INSERT INTO marketplace_install (key, data, position, time_created, time_updated)
+                    VALUES (${key}, ${JSON.stringify(installed)}, ${position}, ${now}, ${now})`,
+                )
+                .pipe(Effect.orDie)
             }
-            const staging = `${target}.tmp-${randomUUID()}`
-            yield* fs.writeWithDirs(staging, JSON.stringify(next, null, 2), 0o600).pipe(Effect.orDie)
-            yield* fs
-              .rename(staging, target)
-              .pipe(Effect.orDie, Effect.ensuring(fs.remove(staging, { force: true }).pipe(Effect.ignore)))
-            return { state: view(next), changed: true }
+
+            return {
+              state: {
+                ...structuredClone(desired),
+                revision,
+              },
+              changed: true,
+            }
           }),
-          `marketplace-registry:${target}`,
         )
-        .pipe(Effect.orDie)
+        .pipe(Effect.catch((error) => (error instanceof ConflictError ? Effect.fail(error) : Effect.die(error))))
     })
 
-    return Service.of({ read, replace, file })
+    return Service.of({ read, replace })
   }),
 )
 
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [FSUtil.node, EffectFlock.node],
+  deps: [Database.node],
 })

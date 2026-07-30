@@ -27,7 +27,7 @@ function withoutMarketplace(config: MarketplaceHostConfig) {
 function activePlan(installed: MarketplaceInstalled): MarketplaceInstallPlan {
   if (installed.active_plan) return installed.active_plan
   if (installed.enabled === false) return {}
-  return installed.plan
+  return installed.materialized_plan ?? installed.plan
 }
 
 function plans(state: MarketplaceState) {
