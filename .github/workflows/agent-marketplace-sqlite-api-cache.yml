@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - agent/marketplace-sqlite-api-cache
+  pull_request:
+    branches:
+      - agent/marketplace-local-registry
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
