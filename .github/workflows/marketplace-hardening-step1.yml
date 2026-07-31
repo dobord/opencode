@@ -7,6 +7,13 @@ on:
     paths:
       - .github/marketplace-hardening-step1.py.gz.b64
       - .github/workflows/marketplace-hardening-step1.yml
+  pull_request:
+    branches:
+      - marketplace
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/marketplace-hardening-step1.py.gz.b64
+      - .github/workflows/marketplace-hardening-step1.yml
   workflow_dispatch:
 
 permissions:
@@ -26,6 +33,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
