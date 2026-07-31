@@ -1,4 +1,12 @@
-
-gzip: stdin: invalid compressed data--crc error
-
-gzip: stdin: invalid compressed data--length error
+From https://github.com/dobord/opencode
+ * branch                dev        -> FETCH_HEAD
+rm 'packages/opencode/config.json'
+rm 'artifacts/marketplace-smoke/marketplace.json'
+rm 'artifacts/marketplace-smoke/mcp/alpha.mjs'
+rm 'artifacts/marketplace-smoke/mcp/bravo.mjs'
+rm 'artifacts/marketplace-smoke/plugins/alpha.ts'
+rm 'artifacts/marketplace-smoke/plugins/bravo.ts'
+rm 'artifacts/marketplace-smoke/skills/alpha/SKILL.md'
+rm 'artifacts/marketplace-smoke/skills/bravo/SKILL.md'
+bun test v1.3.14 (0d9b296a)
+Failed to scan non-existent root directory for tests: "/home/runner/work/opencode/opencode/do-not-run-tests-from-root"
