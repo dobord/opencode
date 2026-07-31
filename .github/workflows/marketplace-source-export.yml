@@ -6,6 +6,10 @@ on:
       - agent/marketplace-source-export
     paths:
       - .github/workflows/marketplace-source-export.yml
+  pull_request:
+    branches:
+      - marketplace
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
