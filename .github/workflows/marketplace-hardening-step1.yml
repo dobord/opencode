@@ -62,8 +62,8 @@ jobs:
           if [ "$status" -ne 0 ]; then
             git reset --hard HEAD
             git clean -fd
-            tail -c 60000 "$RUNNER_TEMP/marketplace-hardening-step1.log" > .github/marketplace-hardening-step1.result.log
-            git add .github/marketplace-hardening-step1.result.log
+            tail -c 60000 "$RUNNER_TEMP/marketplace-hardening-step1.log" > .github/marketplace-hardening-step1-result.txt
+            git add -f .github/marketplace-hardening-step1-result.txt
             git commit -m "ci: record marketplace hardening failure"
             git push origin HEAD:agent/marketplace-codex-hardening
             exit 0
