@@ -1,0 +1,44 @@
+name: agent-deps-export
+
+on:
+  push:
+    branches:
+      - agent/marketplace-hardening
+    paths:
+      - .github/workflows/agent-deps-export.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun and dependencies
+        uses: ./.github/actions/setup-bun
+
+      - name: Archive installed dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --zstd -cf "$RUNNER_TEMP/opencode-deps.tar.zst" \
+            node_modules \
+            packages/*/node_modules \
+            packages/console/*/node_modules \
+            packages/stats/*/node_modules \
+            packages/sdk/js/node_modules \
+            packages/slack/node_modules 2>/dev/null || true
+          test -s "$RUNNER_TEMP/opencode-deps.tar.zst"
+
+      - name: Upload dependencies
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: opencode-deps-linux
+          path: ${{ runner.temp }}/opencode-deps.tar.zst
+          if-no-files-found: error
+          retention-days: 1
