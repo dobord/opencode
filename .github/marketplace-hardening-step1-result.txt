@@ -1,16 +1,4 @@
-From https://github.com/dobord/opencode
- * branch                dev        -> FETCH_HEAD
-rm 'packages/opencode/config.json'
-rm 'artifacts/marketplace-smoke/marketplace.json'
-rm 'artifacts/marketplace-smoke/mcp/alpha.mjs'
-rm 'artifacts/marketplace-smoke/mcp/bravo.mjs'
-rm 'artifacts/marketplace-smoke/plugins/alpha.ts'
-rm 'artifacts/marketplace-smoke/plugins/bravo.ts'
-rm 'artifacts/marketplace-smoke/skills/alpha/SKILL.md'
-rm 'artifacts/marketplace-smoke/skills/bravo/SKILL.md'
-Traceback (most recent call last):
-  File "/home/runner/work/_temp/marketplace-hardening-step1.py", line 451, in <module>
-    replace_all(cache, "          if (hit && row) {\n", "          if (hit && row && staleAllowed(input.mode)) {\n", expected=2)
-  File "/home/runner/work/_temp/marketplace-hardening-step1.py", line 35, in replace_all
-    raise RuntimeError(f"{path}: expected {expected} matches, found {count}: {old[:120]!r}")
-RuntimeError: packages/opencode/src/marketplace/cache.ts: expected 2 matches, found 1: '          if (hit && row) {\n'
+
+gzip: stdin: invalid compressed data--crc error
+
+gzip: stdin: invalid compressed data--length error
