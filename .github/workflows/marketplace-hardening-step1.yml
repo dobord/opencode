@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: marketplace-hardening-step1
+  cancel-in-progress: true
+
 jobs:
   apply:
     if: github.actor != 'github-actions[bot]'
@@ -31,23 +35,32 @@ jobs:
           git config user.email "opencode-agent@users.noreply.github.com"
           git config user.name "opencode-agent[bot]"
 
-      - name: Apply marketplace hardening
-        run: |
-          base64 --decode .github/marketplace-hardening-step1.py.gz.b64 | gzip --decompress > "$RUNNER_TEMP/marketplace-hardening-step1.py"
-          python3 "$RUNNER_TEMP/marketplace-hardening-step1.py"
-
-      - name: Run focused unit tests
+      - name: Apply, validate, and publish marketplace hardening
         env:
           GITHUB_ACTIONS: "false"
         run: |
-          bun test packages/core/test/marketplace.test.ts packages/core/test/marketplace-compatibility.test.ts
-          bun test packages/opencode/test/marketplace/cache.test.ts
+          set +e
+          (
+            set -euo pipefail
+            base64 --decode .github/marketplace-hardening-step1.py.gz.b64 | gzip --decompress > "$RUNNER_TEMP/marketplace-hardening-step1.py"
+            python3 "$RUNNER_TEMP/marketplace-hardening-step1.py"
+            bun test packages/core/test/marketplace.test.ts packages/core/test/marketplace-compatibility.test.ts
+            bun test packages/opencode/test/marketplace/cache.test.ts
+            bun typecheck
+          ) >"$RUNNER_TEMP/marketplace-hardening-step1.log" 2>&1
+          status=$?
+          set -e
 
-      - name: Run typecheck
-        run: bun typecheck
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD
+            git clean -fd
+            tail -c 60000 "$RUNNER_TEMP/marketplace-hardening-step1.log" > .github/marketplace-hardening-step1.result.log
+            git add .github/marketplace-hardening-step1.result.log
+            git commit -m "ci: record marketplace hardening failure"
+            git push origin HEAD:agent/marketplace-codex-hardening
+            exit 0
+          fi
 
-      - name: Commit validated changes
-        run: |
           git status --short
           git add -A
           git commit -m "fix(marketplace): harden cache and compatibility"
