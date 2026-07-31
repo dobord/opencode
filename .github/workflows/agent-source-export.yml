@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/marketplace-hardening
+  pull_request:
+    branches:
+      - dev
 
 permissions:
   contents: read
