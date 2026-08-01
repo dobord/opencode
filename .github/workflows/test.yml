@@ -29,9 +29,15 @@ jobs:
         settings:
           - name: linux
             host: blacksmith-4vcpu-ubuntu-2404
+            fallback: ubuntu-latest
+            fallback_concurrency: 4
           - name: windows
             host: blacksmith-4vcpu-windows-2025
-    runs-on: ${{ matrix.settings.host }}
+            fallback: windows-latest
+            # The hosted Windows runner becomes unstable when the two largest
+            # Bun suites compete for CPU, Git, SQLite, and child-process slots.
+            fallback_concurrency: 1
+    runs-on: ${{ github.repository == 'anomalyco/opencode' && matrix.settings.host || matrix.settings.fallback }}
     defaults:
       run:
         shell: bash
@@ -64,20 +70,98 @@ jobs:
             turbo-${{ runner.os }}-
 
       - name: Run unit tests
-        timeout-minutes: 20
-        run: GITHUB_ACTIONS=false bun turbo test
+        timeout-minutes: ${{ github.repository == 'anomalyco/opencode' && 20 || 45 }}
+        run: |
+          set +e
+          args=()
+          if [ "${{ github.repository }}" != "anomalyco/opencode" ]; then
+            args+=(--concurrency=${{ matrix.settings.fallback_concurrency }})
+          fi
+          GITHUB_ACTIONS=false bun turbo test "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/unit-test.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
+
+      - name: Upload unit test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unit-${{ matrix.settings.name }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/unit-test.log
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Check generated client
         if: runner.os == 'Linux'
         working-directory: packages/client
         run: bun run check:generated
 
+      # Blacksmith completes these gates reliably after the unit suite. GitHub-hosted
+      # runners execute them in isolated jobs below so leaked unit-test children or
+      # process-global state cannot hold the route exerciser open indefinitely.
       - name: Run HttpApi exerciser gates
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && github.repository == 'anomalyco/opencode'
         working-directory: packages/opencode
         run: bun run test:httpapi
+
+  httpapi:
+    if: github.repository != 'anomalyco/opencode'
+    name: httpapi (${{ matrix.mode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - coverage
+          - auth
+          - effect
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Run HttpApi ${{ matrix.mode }} gate
+        working-directory: packages/opencode
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          bun run script/httpapi-exercise.ts \
+            --mode "${{ matrix.mode }}" \
+            --fail-on-missing \
+            --fail-on-skip \
+            --progress \
+            --trace \
+            2>&1 | tee "$RUNNER_TEMP/httpapi-${{ matrix.mode }}.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Upload HttpApi diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: httpapi-${{ matrix.mode }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/httpapi-${{ matrix.mode }}.log
+          if-no-files-found: warn
+          retention-days: 1
 
   e2e:
     name: e2e (${{ matrix.settings.name }})
@@ -87,11 +171,16 @@ jobs:
         settings:
           - name: linux
             host: blacksmith-4vcpu-ubuntu-2404
+            fallback: ubuntu-latest
+            fallback_workers: 5
           - name: windows
             host: blacksmith-4vcpu-windows-2025
-    runs-on: ${{ matrix.settings.host }}
+            fallback: windows-latest
+            fallback_workers: 4
+    runs-on: ${{ github.repository == 'anomalyco/opencode' && matrix.settings.host || matrix.settings.fallback }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
+      PLAYWRIGHT_WORKERS: ${{ github.repository == 'anomalyco/opencode' && 5 || matrix.settings.fallback_workers }}
     defaults:
       run:
         shell: bash

@@ -1,0 +1,40 @@
+name: agent-bun-export
+
+on:
+  push:
+    branches:
+      - agent/marketplace-hardening
+  pull_request:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.14
+
+      - name: Export Bun
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -Dm755 "$(command -v bun)" "$RUNNER_TEMP/bun/bun"
+          "$RUNNER_TEMP/bun/bun" --version
+
+      - name: Upload Bun
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bun-linux-x64
+          path: ${{ runner.temp }}/bun/bun
+          if-no-files-found: error
+          retention-days: 1

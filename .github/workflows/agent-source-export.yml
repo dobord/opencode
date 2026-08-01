@@ -1,0 +1,53 @@
+name: agent-source-export
+
+on:
+  push:
+    branches:
+      - agent/marketplace-hardening
+  pull_request:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    strategy:
+      fail-fast: false
+      matrix:
+        source:
+          - name: feature
+            ref: agent/marketplace-hardening
+          - name: dev
+            ref: dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ matrix.source.ref }}
+
+      - name: Record source metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git show -s --format=%T HEAD)"
+          } > .source-metadata
+
+      - name: Create source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -C "$GITHUB_WORKSPACE" -czf "$RUNNER_TEMP/source-${{ matrix.source.name }}.tar.gz" .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: source-${{ matrix.source.name }}
+          path: ${{ runner.temp }}/source-${{ matrix.source.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
