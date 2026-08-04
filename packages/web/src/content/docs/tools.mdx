@@ -5,7 +5,7 @@ description: Manage the tools an LLM can use.
 
 Tools allow the LLM to perform actions in your codebase. OpenCode comes with a set of built-in tools, but you can extend it with [custom tools](/docs/custom-tools) or [MCP servers](/docs/mcp-servers).
 
-By default, all tools are **enabled** and don't need permission to run. You can control tool behavior through [permissions](/docs/permissions).
+OpenCode exposes built-in tools based on the active client, model, provider, and feature flags. Once a tool is exposed, [permissions](/docs/permissions) determine whether it runs automatically, asks for approval, or is denied. Most permissions default to `allow`, with documented safety exceptions.
 
 ---
 
@@ -41,7 +41,11 @@ You can also use wildcards to control multiple tools at once. For example, to re
 
 ## Built-in
 
-Here are all the built-in tools available in OpenCode.
+The following user-facing built-ins are available in OpenCode. Some are conditional: for example, web search depends on the provider or web-search flags, LSP and code mode are experimental, and the question tool depends on the client.
+
+:::note
+For file changes, OpenCode exposes either `edit`/`write` or `apply_patch` based on the selected model. All three are controlled by the `edit` permission.
+:::
 
 ---
 
@@ -148,6 +152,23 @@ Find files by pattern matching.
 ```
 
 Search for files using glob patterns like `**/*.js` or `src/**/*.ts`. Returns matching file paths sorted by modification time.
+
+---
+
+### task
+
+Launch a configured subagent to perform a focused unit of work. The tool accepts a subagent type, a prompt, and an optional existing task ID to resume. Background execution is available when the background-subagent experiment is enabled.
+
+```json title="opencode.json" {4}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "task": "allow"
+  }
+}
+```
+
+The Task tool only advertises subagents that are not denied by the current agent's `task` permission. Pattern rules can allow or deny individual subagent names.
 
 ---
 

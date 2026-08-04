@@ -29,34 +29,37 @@ It loads any matching `skills/*/SKILL.md` in `.opencode/` and any matching `.cla
 
 Global definitions are also loaded from `~/.config/opencode/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`, and `~/.agents/skills/*/SKILL.md`.
 
+You can add local search roots and remote skill indexes with the `skills` config:
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "paths": ["./team-skills", "~/shared-skills"],
+    "urls": ["https://example.com/.well-known/skills/"]
+  }
+}
+```
+
+- `paths` contains directories that OpenCode scans recursively for `SKILL.md`. Relative paths resolve from the current project directory, and `~/` expands to the home directory.
+- `urls` contains base URLs whose `index.json` files describe downloadable skills. Downloaded files are cached locally.
+
 ---
 
 ## Write frontmatter
 
-Each `SKILL.md` must start with YAML frontmatter.
-Only these fields are recognized:
+Each `SKILL.md` must start with YAML frontmatter. OpenCode currently uses these fields:
 
-- `name` (required)
-- `description` (required)
-- `license` (optional)
-- `compatibility` (optional)
-- `metadata` (optional, string-to-string map)
+- `name` (required string)
+- `description` (optional string)
 
-Unknown frontmatter fields are ignored.
+A skill without a description is loaded and can be requested explicitly by name, but it is not advertised in the native `skill` tool's available-skills list. Other frontmatter fields are parsed but ignored by the runtime.
 
 ---
 
-## Validate names
+## Choose names
 
-`name` must:
-
-- Be 1–64 characters
-- Be lowercase alphanumeric with single hyphen separators
-- Not start or end with `-`
-- Not contain consecutive `--`
-- Match the directory name that contains `SKILL.md`
-
-Equivalent regex:
+OpenCode requires `name` to be a string, but it does not currently enforce a length, naming pattern, or a match with the containing directory. For portable skills and predictable permission patterns, prefer 1–64 lowercase alphanumeric characters with single hyphen separators:
 
 ```text
 ^[a-z0-9]+(-[a-z0-9]+)*$
@@ -64,10 +67,9 @@ Equivalent regex:
 
 ---
 
-## Follow length rules
+## Write useful descriptions
 
-`description` must be 1-1024 characters.
-Keep it specific enough for the agent to choose correctly.
+OpenCode does not currently enforce a description length. Keep descriptions concise and specific enough for the agent to choose correctly; 1–1024 characters is a portable guideline.
 
 ---
 
@@ -217,6 +219,6 @@ When disabled, the `<available_skills>` section is omitted entirely.
 If a skill does not show up:
 
 1. Verify `SKILL.md` is spelled in all caps
-2. Check that frontmatter includes `name` and `description`
+2. Check that frontmatter includes a string `name`; add `description` so the skill is advertised to agents
 3. Ensure skill names are unique across all locations
 4. Check permissions—skills with `deny` are hidden from agents

@@ -18,13 +18,13 @@ opencode serve [--port <number>] [--hostname <string>] [--cors <origin>]
 
 #### Options
 
-| Flag            | Description                         | Default          |
-| --------------- | ----------------------------------- | ---------------- |
-| `--port`        | Port to listen on                   | `4096`           |
-| `--hostname`    | Hostname to listen on               | `127.0.0.1`      |
-| `--mdns`        | Enable mDNS discovery               | `false`          |
-| `--mdns-domain` | Custom domain name for mDNS service | `opencode.local` |
-| `--cors`        | Additional browser origins to allow | `[]`             |
+| Flag            | Description                         | Default                  |
+| --------------- | ----------------------------------- | ------------------------ |
+| `--port`        | Port to listen on                   | `4096`, then a free port |
+| `--hostname`    | Hostname to listen on               | `127.0.0.1`              |
+| `--mdns`        | Enable mDNS discovery               | `false`                  |
+| `--mdns-domain` | Custom domain name for mDNS service | `opencode.local`         |
+| `--cors`        | Additional browser origins to allow | `[]`                     |
 
 `--cors` can be passed multiple times:
 
@@ -63,7 +63,7 @@ opencode TUI running, `opencode serve` will start a new server.
 
 #### Connect to an existing server
 
-When you start the TUI it randomly assigns a port and hostname. You can instead pass in the `--hostname` and `--port` [flags](/docs/cli). Then use this to connect to its server.
+When you start the TUI, its server binds to `127.0.0.1`, tries port `4096`, and falls back to a free port if needed. You can pass the `--hostname` and `--port` [flags](/docs/cli) to choose fixed values, then connect another client to that server.
 
 The [`/tui`](#tui) endpoint can be used to drive the TUI through the server. For example, you can prefill or run a prompt. This setup is used by the OpenCode [IDE](/docs/ide) plugins.
 
@@ -77,13 +77,13 @@ The server publishes an OpenAPI 3.1 spec that can be viewed at:
 http://<hostname>:<port>/doc
 ```
 
-For example, `http://localhost:4096/doc`. Use the spec to generate clients or inspect request and response types. Or view it in a Swagger explorer.
+For example, `http://localhost:4096/doc`. The endpoint returns the OpenAPI document as JSON; pass that URL to a Swagger-compatible explorer or client generator. It is the authoritative source for paths, parameters, and response schemas.
 
 ---
 
 ## APIs
 
-The opencode server exposes the following APIs.
+The tables below summarize commonly used compatibility endpoints. They are intentionally non-exhaustive. The live `/doc` document also includes the versioned `/api/*` surface, additional compatibility endpoints, and `/experimental/*` APIs. Use `/doc` rather than this page when generating a client or checking the exact contract.
 
 ---
 
@@ -134,50 +134,50 @@ The opencode server exposes the following APIs.
 
 ### Provider
 
-| Method | Path                             | Description                          | Response                                                                            |
-| ------ | -------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
-| `GET`  | `/provider`                      | List all providers                   | `{ all: `<a href={typesUrl}>Provider[]</a>`, default: {...}, connected: string[] }` |
-| `GET`  | `/provider/auth`                 | Get provider authentication methods  | `{ [providerID: string]: `<a href={typesUrl}>ProviderAuthMethod[]</a>` }`           |
-| `POST` | `/provider/{id}/oauth/authorize` | Authorize a provider using OAuth     | <a href={typesUrl}><code>ProviderAuthAuthorization</code></a>                       |
-| `POST` | `/provider/{id}/oauth/callback`  | Handle OAuth callback for a provider | `boolean`                                                                           |
+| Method | Path                                     | Description                          | Response                                                                            |
+| ------ | ---------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| `GET`  | `/provider`                              | List all providers                   | `{ all: `<a href={typesUrl}>Provider[]</a>`, default: {...}, connected: string[] }` |
+| `GET`  | `/provider/auth`                         | Get provider authentication methods  | `{ [providerID: string]: `<a href={typesUrl}>ProviderAuthMethod[]</a>` }`           |
+| `POST` | `/provider/{providerID}/oauth/authorize` | Authorize a provider using OAuth     | <a href={typesUrl}><code>ProviderAuthAuthorization</code></a>                       |
+| `POST` | `/provider/{providerID}/oauth/callback`  | Handle OAuth callback for a provider | `boolean`                                                                           |
 
 ---
 
 ### Sessions
 
-| Method   | Path                                     | Description                           | Notes                                                                              |
-| -------- | ---------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
-| `GET`    | `/session`                               | List all sessions                     | Returns <a href={typesUrl}><code>Session[]</code></a>                              |
-| `POST`   | `/session`                               | Create a new session                  | body: `{ parentID?, title? }`, returns <a href={typesUrl}><code>Session</code></a> |
-| `GET`    | `/session/status`                        | Get session status for all sessions   | Returns `{ [sessionID: string]: `<a href={typesUrl}>SessionStatus</a>` }`          |
-| `GET`    | `/session/:id`                           | Get session details                   | Returns <a href={typesUrl}><code>Session</code></a>                                |
-| `DELETE` | `/session/:id`                           | Delete a session and all its data     | Returns `boolean`                                                                  |
-| `PATCH`  | `/session/:id`                           | Update session properties             | body: `{ title? }`, returns <a href={typesUrl}><code>Session</code></a>            |
-| `GET`    | `/session/:id/children`                  | Get a session's child sessions        | Returns <a href={typesUrl}><code>Session[]</code></a>                              |
-| `GET`    | `/session/:id/todo`                      | Get the todo list for a session       | Returns <a href={typesUrl}><code>Todo[]</code></a>                                 |
-| `POST`   | `/session/:id/init`                      | Analyze app and create `AGENTS.md`    | body: `{ messageID, providerID, modelID }`, returns `boolean`                      |
-| `POST`   | `/session/:id/fork`                      | Fork an existing session at a message | body: `{ messageID? }`, returns <a href={typesUrl}><code>Session</code></a>        |
-| `POST`   | `/session/:id/abort`                     | Abort a running session               | Returns `boolean`                                                                  |
-| `POST`   | `/session/:id/share`                     | Share a session                       | Returns <a href={typesUrl}><code>Session</code></a>                                |
-| `DELETE` | `/session/:id/share`                     | Unshare a session                     | Returns <a href={typesUrl}><code>Session</code></a>                                |
-| `GET`    | `/session/:id/diff`                      | Get the diff for this session         | query: `messageID?`, returns <a href={typesUrl}><code>FileDiff[]</code></a>        |
-| `POST`   | `/session/:id/summarize`                 | Summarize the session                 | body: `{ providerID, modelID }`, returns `boolean`                                 |
-| `POST`   | `/session/:id/revert`                    | Revert a message                      | body: `{ messageID, partID? }`, returns `boolean`                                  |
-| `POST`   | `/session/:id/unrevert`                  | Restore all reverted messages         | Returns `boolean`                                                                  |
-| `POST`   | `/session/:id/permissions/:permissionID` | Respond to a permission request       | body: `{ response, remember? }`, returns `boolean`                                 |
+| Method   | Path                                              | Description                           | Notes                                                                              |
+| -------- | ------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `GET`    | `/session`                                        | List all sessions                     | Returns <a href={typesUrl}><code>Session[]</code></a>                              |
+| `POST`   | `/session`                                        | Create a new session                  | body: `{ parentID?, title? }`, returns <a href={typesUrl}><code>Session</code></a> |
+| `GET`    | `/session/status`                                 | Get session status for all sessions   | Returns `{ [sessionID: string]: `<a href={typesUrl}>SessionStatus</a>` }`          |
+| `GET`    | `/session/{sessionID}`                            | Get session details                   | Returns <a href={typesUrl}><code>Session</code></a>                                |
+| `DELETE` | `/session/{sessionID}`                            | Delete a session and all its data     | Returns `boolean`                                                                  |
+| `PATCH`  | `/session/{sessionID}`                            | Update session properties             | body: `{ title? }`, returns <a href={typesUrl}><code>Session</code></a>            |
+| `GET`    | `/session/{sessionID}/children`                   | Get a session's child sessions        | Returns <a href={typesUrl}><code>Session[]</code></a>                              |
+| `GET`    | `/session/{sessionID}/todo`                       | Get the todo list for a session       | Returns <a href={typesUrl}><code>Todo[]</code></a>                                 |
+| `POST`   | `/session/{sessionID}/init`                       | Analyze app and create `AGENTS.md`    | body: `{ messageID, providerID, modelID }`, returns `boolean`                      |
+| `POST`   | `/session/{sessionID}/fork`                       | Fork an existing session at a message | body: `{ messageID? }`, returns <a href={typesUrl}><code>Session</code></a>        |
+| `POST`   | `/session/{sessionID}/abort`                      | Abort a running session               | Returns `boolean`                                                                  |
+| `POST`   | `/session/{sessionID}/share`                      | Share a session                       | Returns <a href={typesUrl}><code>Session</code></a>                                |
+| `DELETE` | `/session/{sessionID}/share`                      | Unshare a session                     | Returns <a href={typesUrl}><code>Session</code></a>                                |
+| `GET`    | `/session/{sessionID}/diff`                       | Get the diff for this session         | query: `messageID?`, returns <a href={typesUrl}><code>FileDiff[]</code></a>        |
+| `POST`   | `/session/{sessionID}/summarize`                  | Summarize the session                 | body: `{ providerID, modelID }`, returns `boolean`                                 |
+| `POST`   | `/session/{sessionID}/revert`                     | Revert a message                      | body: `{ messageID, partID? }`, returns `boolean`                                  |
+| `POST`   | `/session/{sessionID}/unrevert`                   | Restore all reverted messages         | Returns `boolean`                                                                  |
+| `POST`   | `/session/{sessionID}/permissions/{permissionID}` | Respond to a permission request       | body: `{ response, remember? }`, returns `boolean`                                 |
 
 ---
 
 ### Messages
 
-| Method | Path                              | Description                             | Notes                                                                                                                                                                 |
-| ------ | --------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/session/:id/message`            | List messages in a session              | query: `limit?`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}[]`                                                        |
-| `POST` | `/session/:id/message`            | Send a message and wait for response    | body: `{ messageID?, model?, agent?, noReply?, system?, tools?, parts }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}` |
-| `GET`  | `/session/:id/message/:messageID` | Get message details                     | Returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`                                                                           |
-| `POST` | `/session/:id/prompt_async`       | Send a message asynchronously (no wait) | body: same as `/session/:id/message`, returns `204 No Content`                                                                                                        |
-| `POST` | `/session/:id/command`            | Execute a slash command                 | body: `{ messageID?, agent?, model?, command, arguments }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`               |
-| `POST` | `/session/:id/shell`              | Run a shell command                     | body: `{ agent, model?, command }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`                                       |
+| Method | Path                                       | Description                             | Notes                                                                                                                                                                 |
+| ------ | ------------------------------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/session/{sessionID}/message`             | List messages in a session              | query: `limit?`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}[]`                                                        |
+| `POST` | `/session/{sessionID}/message`             | Send a message and wait for response    | body: `{ messageID?, model?, agent?, noReply?, system?, tools?, parts }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}` |
+| `GET`  | `/session/{sessionID}/message/{messageID}` | Get message details                     | Returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`                                                                           |
+| `POST` | `/session/{sessionID}/prompt_async`        | Send a message asynchronously (no wait) | body: same as `/session/{sessionID}/message`, returns `204 No Content`                                                                                                |
+| `POST` | `/session/{sessionID}/command`             | Execute a slash command                 | body: `{ messageID?, agent?, model?, command, arguments }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`               |
+| `POST` | `/session/{sessionID}/shell`               | Run a shell command                     | body: `{ agent, model?, command }`, returns `{ info: `<a href={typesUrl}>Message</a>`, parts: `<a href={typesUrl}>Part[]</a>`}`                                       |
 
 ---
 
@@ -228,6 +228,8 @@ The opencode server exposes the following APIs.
 | `GET`  | `/mcp`       | Get MCP server status      | `{ [name: string]: `<a href={typesUrl}>MCPStatus</a>` }` |
 | `POST` | `/mcp`       | Add MCP server dynamically | body: `{ name, config }`, returns MCP status object      |
 
+The live specification also exposes MCP connection and OAuth operations under `/mcp/{name}/*`.
+
 ---
 
 ### Agents
@@ -261,14 +263,35 @@ The opencode server exposes the following APIs.
 | `POST` | `/tui/show-toast`       | Show toast (`{ title?, message, variant }`) | `boolean`              |
 | `GET`  | `/tui/control/next`     | Wait for the next control request           | Control request object |
 | `POST` | `/tui/control/response` | Respond to a control request (`{ body }`)   | `boolean`              |
+| `POST` | `/tui/publish`          | Publish a TUI event                         | `boolean`              |
+| `POST` | `/tui/select-session`   | Select the active TUI session               | `boolean`              |
 
 ---
 
 ### Auth
 
-| Method | Path        | Description                                                     | Response  |
-| ------ | ----------- | --------------------------------------------------------------- | --------- |
-| `PUT`  | `/auth/:id` | Set authentication credentials. Body must match provider schema | `boolean` |
+| Method   | Path                 | Description                                                     | Response  |
+| -------- | -------------------- | --------------------------------------------------------------- | --------- |
+| `PUT`    | `/auth/{providerID}` | Set authentication credentials. Body must match provider schema | `boolean` |
+| `DELETE` | `/auth/{providerID}` | Remove authentication credentials                               | `boolean` |
+
+---
+
+### Requests, questions, and terminals
+
+The compatibility API also exposes pending permission requests, user questions, and PTY sessions:
+
+| Method | Path                            | Description                      |
+| ------ | ------------------------------- | -------------------------------- |
+| `GET`  | `/permission`                   | List pending permission requests |
+| `POST` | `/permission/{requestID}/reply` | Reply to a permission request    |
+| `GET`  | `/question`                     | List pending questions           |
+| `POST` | `/question/{requestID}/reply`   | Answer a pending question        |
+| `POST` | `/question/{requestID}/reject`  | Reject a pending question        |
+| `GET`  | `/pty`                          | List PTY sessions                |
+| `POST` | `/pty`                          | Create a PTY session             |
+
+See `/doc` for PTY detail, update, delete, connect, and token endpoints.
 
 ---
 
@@ -282,6 +305,6 @@ The opencode server exposes the following APIs.
 
 ### Docs
 
-| Method | Path   | Description               | Response                    |
-| ------ | ------ | ------------------------- | --------------------------- |
-| `GET`  | `/doc` | OpenAPI 3.1 specification | HTML page with OpenAPI spec |
+| Method | Path   | Description               | Response              |
+| ------ | ------ | ------------------------- | --------------------- |
+| `GET`  | `/doc` | OpenAPI 3.1 specification | OpenAPI JSON document |
