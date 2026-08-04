@@ -207,7 +207,7 @@ export const RunCommand = effectCmd({
       })
       .option("port", {
         type: "number",
-        describe: "port for the local server (defaults to random port if no value provided)",
+        describe: "port for the local server (tries 4096, then falls back to a free port)",
       })
       .option("variant", {
         type: "string",

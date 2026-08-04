@@ -150,11 +150,12 @@ Keep the list focused on trusted paths, and layer extra allow or deny rules as n
 OpenCode permissions are keyed by tool name, plus a couple of safety guards:
 
 - `read` — reading a file (matches the file path)
-- `edit` — all file modifications (covers `edit`, `write`, `patch`)
+- `edit` — all file modifications (covers `edit`, `write`, `apply_patch`)
 - `glob` — file globbing (matches the glob pattern)
 - `grep` — content search (matches the regex pattern)
 - `bash` — running shell commands (matches parsed commands like `git status --porcelain`)
 - `task` — launching subagents (matches the subagent type)
+- `todowrite` — updating the structured todo list (currently non-granular)
 - `skill` — loading a skill (matches the skill name)
 - `lsp` — running LSP queries (currently non-granular)
 - `question` — asking the user questions during execution
@@ -171,15 +172,15 @@ If you don’t specify anything, OpenCode starts from permissive defaults:
 
 - Most permissions default to `"allow"`.
 - `doom_loop` and `external_directory` default to `"ask"`.
-- `read` is `"allow"`, but `.env` files are denied by default:
+- `read` is `"allow"`, but `.env` files require approval by default:
 
 ```json title="opencode.json"
 {
   "permission": {
     "read": {
       "*": "allow",
-      "*.env": "deny",
-      "*.env.*": "deny",
+      "*.env": "ask",
+      "*.env.*": "ask",
       "*.env.example": "allow"
     }
   }

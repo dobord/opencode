@@ -49,8 +49,9 @@ Config sources are loaded in this order (later sources override earlier ones):
 4. **Project config** (`opencode.json` in project) - project-specific settings
 5. **`.opencode` directories** - agents, commands, plugins
 6. **Inline config** (`OPENCODE_CONFIG_CONTENT` env var) - runtime overrides
-7. **Managed config files** (`/Library/Application Support/opencode/` on macOS) - admin-controlled
-8. **macOS managed preferences** (`.mobileconfig` via MDM) - highest priority, not user-overridable
+7. **Active Console organization config** - organization settings for the signed-in account
+8. **Managed config files** (system-wide managed directory) - admin-controlled
+9. **macOS managed preferences** (`.mobileconfig` via MDM) - highest priority, not user-overridable
 
 This means project configs can override global defaults, and global configs can override remote organizational defaults. Managed settings override everything.
 
@@ -332,6 +333,32 @@ You can configure the shell used for the interactive terminal using the `shell` 
 ```
 
 If not specified, OpenCode will automatically discover and use a sensible default based on your operating system (e.g. `pwsh` or `cmd.exe` on Windows, `/bin/zsh` or `/bin/bash` on macOS/Linux). You can provide an absolute path or a short name.
+
+---
+
+### Log level
+
+Set the runtime log level with `logLevel`. Supported values are `DEBUG`, `INFO`, `WARN`, and `ERROR`.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "logLevel": "INFO"
+}
+```
+
+---
+
+### Username
+
+Set `username` to change the name displayed for you in conversations. This is separate from `OPENCODE_SERVER_USERNAME`, which configures HTTP Basic authentication.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "username": "Ada"
+}
+```
 
 ---
 
@@ -717,7 +744,7 @@ Use an object to keep built-ins enabled while configuring overrides or custom LS
 
 ### Permissions
 
-By default, opencode **allows all operations** without requiring explicit approval. You can change this using the `permission` option.
+OpenCode allows most operations by default, but safety-sensitive actions are not universally auto-approved. `doom_loop` and `external_directory` default to `ask`, and reading `.env` files also asks for approval. You can change these rules with the `permission` option.
 
 For example, to ensure that the `edit` and `bash` tools require user approval:
 
@@ -735,6 +762,25 @@ For example, to ensure that the `edit` and `bash` tools require user approval:
 
 ---
 
+### Tool output
+
+Use `tool_output` to control when large tool results are truncated in the model-visible response. When either threshold is exceeded, OpenCode writes the full output to its truncation directory and returns a preview.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "tool_output": {
+    "max_lines": 2000,
+    "max_bytes": 51200
+  }
+}
+```
+
+- `max_lines` - Maximum number of lines before truncation (default: `2000`).
+- `max_bytes` - Maximum number of bytes before truncation (default: `51200`).
+
+---
+
 ### Compaction
 
 You can control context compaction behavior through the `compaction` option.
@@ -745,6 +791,8 @@ You can control context compaction behavior through the `compaction` option.
   "compaction": {
     "auto": true,
     "prune": false,
+    "tail_turns": 2,
+    "preserve_recent_tokens": 8000,
     "reserved": 10000
   }
 }
@@ -752,6 +800,8 @@ You can control context compaction behavior through the `compaction` option.
 
 - `auto` - Automatically compact the session when context is full (default: `true`).
 - `prune` - Remove old tool outputs to save tokens (default: `false`). Set to `true` to enable pruning.
+- `tail_turns` - Number of recent user turns, with their assistant and tool responses, to keep verbatim (default: `2`). Set to `0` to disable verbatim tail preservation.
+- `preserve_recent_tokens` - Maximum token budget for the preserved recent turns. If omitted, OpenCode derives a budget from the model context window and clamps it between 2000 and 8000 tokens.
 - `reserved` - Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
 
 ---
@@ -872,9 +922,22 @@ The `experimental` key contains options that are under active development.
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
-  "experimental": {}
+  "experimental": {
+    "openTelemetry": true,
+    "mcp_timeout": 30000
+  }
 }
 ```
+
+Available keys include:
+
+| Key                     | Description                                                  |
+| ----------------------- | ------------------------------------------------------------ |
+| `openTelemetry`         | Emit OpenTelemetry spans for AI SDK calls                    |
+| `primary_tools`         | Tool IDs that should only be available to primary agents     |
+| `continue_loop_on_deny` | Continue the agent loop after a denied tool call             |
+| `mcp_timeout`           | Timeout in milliseconds for MCP requests                     |
+| `policies`              | Policy statements for supported resources, such as providers |
 
 :::caution
 Experimental options are not stable. They may change or be removed without notice.

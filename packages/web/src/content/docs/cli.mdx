@@ -29,20 +29,23 @@ opencode [project]
 
 #### Flags
 
-| Flag                                        | Short | Description                                                             |
-| ------------------------------------------- | ----- | ----------------------------------------------------------------------- |
-| <nobr><code>{"--continue"}</code></nobr>    | `-c`  | Continue the last session                                               |
-| <nobr><code>{"--session"}</code></nobr>     | `-s`  | Session ID to continue                                                  |
-| <nobr><code>{"--fork"}</code></nobr>        |       | Fork the session when continuing (use with `--continue` or `--session`) |
-| <nobr><code>{"--prompt"}</code></nobr>      |       | Prompt to use                                                           |
-| <nobr><code>{"--model"}</code></nobr>       | `-m`  | Model to use in the form of provider/model                              |
-| <nobr><code>{"--agent"}</code></nobr>       |       | Agent to use                                                            |
-| <nobr><code>{"--auto"}</code></nobr>        |       | Auto-approve permissions that are not explicitly denied                 |
-| <nobr><code>{"--port"}</code></nobr>        |       | Port to listen on                                                       |
-| <nobr><code>{"--hostname"}</code></nobr>    |       | Hostname to listen on                                                   |
-| <nobr><code>{"--mdns"}</code></nobr>        |       | Enable mDNS discovery                                                   |
-| <nobr><code>{"--mdns-domain"}</code></nobr> |       | Custom mDNS domain name                                                 |
-| <nobr><code>{"--cors"}</code></nobr>        |       | Additional browser origin(s) to allow CORS                              |
+| Flag                                         | Short | Description                                                                |
+| -------------------------------------------- | ----- | -------------------------------------------------------------------------- |
+| <nobr><code>{"--continue"}</code></nobr>     | `-c`  | Continue the last session                                                  |
+| <nobr><code>{"--session"}</code></nobr>      | `-s`  | Session ID to continue                                                     |
+| <nobr><code>{"--fork"}</code></nobr>         |       | Fork the session when continuing (use with `--continue` or `--session`)    |
+| <nobr><code>{"--prompt"}</code></nobr>       |       | Prompt to use                                                              |
+| <nobr><code>{"--model"}</code></nobr>        | `-m`  | Model to use in the form of provider/model                                 |
+| <nobr><code>{"--agent"}</code></nobr>        |       | Agent to use                                                               |
+| <nobr><code>{"--auto"}</code></nobr>         |       | Auto-approve permissions that are not explicitly denied                    |
+| <nobr><code>{"--mini"}</code></nobr>         |       | Start the minimal interactive interface                                    |
+| <nobr><code>{"--no-replay"}</code></nobr>    |       | Disable mini history replay on resume and after resize (requires `--mini`) |
+| <nobr><code>{"--replay-limit"}</code></nobr> |       | Keep only the newest N messages in mini replay (requires `--mini`)         |
+| <nobr><code>{"--port"}</code></nobr>         |       | Port to listen on                                                          |
+| <nobr><code>{"--hostname"}</code></nobr>     |       | Hostname to listen on                                                      |
+| <nobr><code>{"--mdns"}</code></nobr>         |       | Enable mDNS discovery                                                      |
+| <nobr><code>{"--mdns-domain"}</code></nobr>  |       | Custom mDNS domain name                                                    |
+| <nobr><code>{"--cors"}</code></nobr>         |       | Additional browser origin(s) to allow CORS                                 |
 
 ---
 
@@ -101,7 +104,7 @@ opencode agent list
 Attach a terminal to an already running OpenCode backend server started via `serve` or `web` commands.
 
 ```bash
-opencode attach [url]
+opencode attach <url>
 ```
 
 This allows using the TUI with a remote OpenCode backend. For example:
@@ -116,22 +119,27 @@ opencode attach http://10.20.30.40:4096
 
 #### Flags
 
-| Flag                                     | Short | Description                                                                |
-| ---------------------------------------- | ----- | -------------------------------------------------------------------------- |
-| <nobr><code>{"--dir"}</code></nobr>      |       | Working directory to start TUI in                                          |
-| <nobr><code>{"--continue"}</code></nobr> | `-c`  | Continue the last session                                                  |
-| <nobr><code>{"--session"}</code></nobr>  | `-s`  | Session ID to continue                                                     |
-| <nobr><code>{"--fork"}</code></nobr>     |       | Fork the session when continuing (use with `--continue` or `--session`)    |
-| <nobr><code>{"--password"}</code></nobr> | `-p`  | Basic auth password (defaults to `OPENCODE_SERVER_PASSWORD`)               |
-| <nobr><code>{"--username"}</code></nobr> | `-u`  | Basic auth username (defaults to `OPENCODE_SERVER_USERNAME` or `opencode`) |
+| Flag                                         | Short | Description                                                                |
+| -------------------------------------------- | ----- | -------------------------------------------------------------------------- |
+| <nobr><code>{"--dir"}</code></nobr>          |       | Working directory to start TUI in                                          |
+| <nobr><code>{"--continue"}</code></nobr>     | `-c`  | Continue the last session                                                  |
+| <nobr><code>{"--session"}</code></nobr>      | `-s`  | Session ID to continue                                                     |
+| <nobr><code>{"--fork"}</code></nobr>         |       | Fork the session when continuing (use with `--continue` or `--session`)    |
+| <nobr><code>{"--mini"}</code></nobr>         |       | Start the minimal interactive interface                                    |
+| <nobr><code>{"--no-replay"}</code></nobr>    |       | Disable mini history replay on resume and after resize (requires `--mini`) |
+| <nobr><code>{"--replay-limit"}</code></nobr> |       | Keep only the newest N messages in mini replay (requires `--mini`)         |
+| <nobr><code>{"--password"}</code></nobr>     | `-p`  | Basic auth password (defaults to `OPENCODE_SERVER_PASSWORD`)               |
+| <nobr><code>{"--username"}</code></nobr>     | `-u`  | Basic auth username (defaults to `OPENCODE_SERVER_USERNAME` or `opencode`) |
 
 ---
 
 ### auth
 
-Command to manage credentials and login for providers.
+The canonical command for managing AI providers and credentials is `providers`. `auth` remains an alias for compatibility.
 
 ```bash
+opencode providers [command]
+# Equivalent alias:
 opencode auth [command]
 ```
 
@@ -139,13 +147,13 @@ opencode auth [command]
 
 #### login
 
-OpenCode is powered by the provider list at [Models.dev](https://models.dev), so you can use `opencode auth login` to configure API keys for any provider you'd like to use. This is stored in `~/.local/share/opencode/auth.json`.
+OpenCode is powered by the provider list at [Models.dev](https://models.dev), so you can use `opencode providers login` (or `opencode auth login`) to configure API keys for any provider you'd like to use. Credentials are stored in `auth.json` inside the OpenCode data directory; on Linux this is typically `~/.local/share/opencode/auth.json`.
 
 ```bash
-opencode auth login
+opencode providers login [url]
 ```
 
-When OpenCode starts up it loads the providers from the credentials file. And if there are any keys defined in your environments or a `.env` file in your project.
+The optional `url` is for a custom auth provider that publishes login metadata at `/.well-known/opencode`. When OpenCode starts, it also discovers provider credentials from supported environment variables and project `.env` files.
 
 ##### Flags
 
@@ -161,13 +169,13 @@ When OpenCode starts up it loads the providers from the credentials file. And if
 Lists all the authenticated providers as stored in the credentials file.
 
 ```bash
-opencode auth list
+opencode providers list
 ```
 
 Or the short version.
 
 ```bash
-opencode auth ls
+opencode providers ls
 ```
 
 ---
@@ -177,7 +185,7 @@ opencode auth ls
 Logs you out of a provider by clearing it from the credentials file.
 
 ```bash
-opencode auth logout
+opencode providers logout [provider]
 ```
 
 ---
@@ -236,10 +244,30 @@ opencode mcp [command]
 Add an MCP server to your configuration.
 
 ```bash
-opencode mcp add
+opencode mcp add [name]
 ```
 
-This command will guide you through adding either a local or remote MCP server.
+Without arguments, this command guides you through adding either a local or remote MCP server.
+
+To configure a server non-interactively, provide a name and either a remote URL or a local command after `--`:
+
+```bash
+# Remote server
+opencode mcp add docs --url https://example.com/mcp --header "Authorization=Bearer $TOKEN"
+
+# Local server
+opencode mcp add filesystem --env "ROOT=/workspace" -- npx -y @modelcontextprotocol/server-filesystem /workspace
+```
+
+Non-interactive additions are written to the global config. Use either `--url` or a command after `--`, not both.
+
+##### Flags
+
+| Flag                                   | Description                                                     |
+| -------------------------------------- | --------------------------------------------------------------- |
+| <nobr><code>{"--url"}</code></nobr>    | URL for a remote MCP server                                     |
+| <nobr><code>{"--env"}</code></nobr>    | Repeatable `KEY=VALUE` environment entry for a local MCP server |
+| <nobr><code>{"--header"}</code></nobr> | Repeatable `KEY=VALUE` HTTP header for a remote MCP server      |
 
 ---
 
@@ -362,26 +390,27 @@ opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
 
 #### Flags
 
-| Flag                                     | Short | Description                                                                |
-| ---------------------------------------- | ----- | -------------------------------------------------------------------------- |
-| <nobr><code>{"--command"}</code></nobr>  |       | The command to run, use message for args                                   |
-| <nobr><code>{"--continue"}</code></nobr> | `-c`  | Continue the last session                                                  |
-| <nobr><code>{"--session"}</code></nobr>  | `-s`  | Session ID to continue                                                     |
-| <nobr><code>{"--fork"}</code></nobr>     |       | Fork the session when continuing (use with `--continue` or `--session`)    |
-| <nobr><code>{"--share"}</code></nobr>    |       | Share the session                                                          |
-| <nobr><code>{"--model"}</code></nobr>    | `-m`  | Model to use in the form of provider/model                                 |
-| <nobr><code>{"--agent"}</code></nobr>    |       | Agent to use                                                               |
-| <nobr><code>{"--file"}</code></nobr>     | `-f`  | File(s) to attach to message                                               |
-| <nobr><code>{"--format"}</code></nobr>   |       | Format: default (formatted) or json (raw JSON events)                      |
-| <nobr><code>{"--title"}</code></nobr>    |       | Title for the session (uses truncated prompt if no value provided)         |
-| <nobr><code>{"--attach"}</code></nobr>   |       | Attach to a running opencode server (e.g., http://localhost:4096)          |
-| <nobr><code>{"--password"}</code></nobr> | `-p`  | Basic auth password (defaults to `OPENCODE_SERVER_PASSWORD`)               |
-| <nobr><code>{"--username"}</code></nobr> | `-u`  | Basic auth username (defaults to `OPENCODE_SERVER_USERNAME` or `opencode`) |
-| <nobr><code>{"--dir"}</code></nobr>      |       | Directory to run in, or path on the remote server when attaching           |
-| <nobr><code>{"--port"}</code></nobr>     |       | Port for the local server (defaults to random port)                        |
-| <nobr><code>{"--variant"}</code></nobr>  |       | Model variant (provider-specific reasoning effort)                         |
-| <nobr><code>{"--thinking"}</code></nobr> |       | Show thinking blocks                                                       |
-| <nobr><code>{"--auto"}</code></nobr>     |       | Auto-approve permissions that are not explicitly denied                    |
+| Flag                                        | Short | Description                                                                |
+| ------------------------------------------- | ----- | -------------------------------------------------------------------------- |
+| <nobr><code>{"--command"}</code></nobr>     |       | The command to run, use message for args                                   |
+| <nobr><code>{"--continue"}</code></nobr>    | `-c`  | Continue the last session                                                  |
+| <nobr><code>{"--session"}</code></nobr>     | `-s`  | Session ID to continue                                                     |
+| <nobr><code>{"--fork"}</code></nobr>        |       | Fork the session when continuing (use with `--continue` or `--session`)    |
+| <nobr><code>{"--share"}</code></nobr>       |       | Share the session                                                          |
+| <nobr><code>{"--model"}</code></nobr>       | `-m`  | Model to use in the form of provider/model                                 |
+| <nobr><code>{"--agent"}</code></nobr>       |       | Agent to use                                                               |
+| <nobr><code>{"--file"}</code></nobr>        | `-f`  | File(s) to attach to message                                               |
+| <nobr><code>{"--format"}</code></nobr>      |       | Format: default (formatted) or json (raw JSON events)                      |
+| <nobr><code>{"--title"}</code></nobr>       |       | Title for the session (uses truncated prompt if no value provided)         |
+| <nobr><code>{"--attach"}</code></nobr>      |       | Attach to a running opencode server (e.g., http://localhost:4096)          |
+| <nobr><code>{"--password"}</code></nobr>    | `-p`  | Basic auth password (defaults to `OPENCODE_SERVER_PASSWORD`)               |
+| <nobr><code>{"--username"}</code></nobr>    | `-u`  | Basic auth username (defaults to `OPENCODE_SERVER_USERNAME` or `opencode`) |
+| <nobr><code>{"--dir"}</code></nobr>         |       | Directory to run in, or path on the remote server when attaching           |
+| <nobr><code>{"--port"}</code></nobr>        |       | Local server port (tries 4096, then falls back to a free port)             |
+| <nobr><code>{"--variant"}</code></nobr>     |       | Model variant (provider-specific reasoning effort)                         |
+| <nobr><code>{"--thinking"}</code></nobr>    |       | Show thinking blocks                                                       |
+| <nobr><code>{"--interactive"}</code></nobr> | `-i`  | Run in direct interactive split-footer mode                                |
+| <nobr><code>{"--auto"}</code></nobr>        |       | Auto-approve permissions that are not explicitly denied                    |
 
 ---
 
@@ -677,33 +706,51 @@ The opencode CLI takes the following global flags.
 
 OpenCode can be configured using environment variables.
 
-| Variable                              | Type    | Description                                       |
-| ------------------------------------- | ------- | ------------------------------------------------- |
-| `OPENCODE_AUTO_SHARE`                 | boolean | Automatically share sessions                      |
-| `OPENCODE_GIT_BASH_PATH`              | string  | Path to Git Bash executable on Windows            |
-| `OPENCODE_CONFIG`                     | string  | Path to config file                               |
-| `OPENCODE_TUI_CONFIG`                 | string  | Path to TUI config file                           |
-| `OPENCODE_CONFIG_DIR`                 | string  | Path to config directory                          |
-| `OPENCODE_CONFIG_CONTENT`             | string  | Inline json config content                        |
-| `OPENCODE_DISABLE_AUTOUPDATE`         | boolean | Disable automatic update checks                   |
-| `OPENCODE_DISABLE_PRUNE`              | boolean | Disable pruning of old data                       |
-| `OPENCODE_DISABLE_TERMINAL_TITLE`     | boolean | Disable automatic terminal title updates          |
-| `OPENCODE_PERMISSION`                 | string  | Inlined json permissions config                   |
-| `OPENCODE_DISABLE_DEFAULT_PLUGINS`    | boolean | Disable default plugins                           |
-| `OPENCODE_DISABLE_LSP_DOWNLOAD`       | boolean | Disable automatic LSP server downloads            |
-| `OPENCODE_ENABLE_EXPERIMENTAL_MODELS` | boolean | Enable experimental models                        |
-| `OPENCODE_DISABLE_AUTOCOMPACT`        | boolean | Disable automatic context compaction              |
-| `OPENCODE_DISABLE_CLAUDE_CODE`        | boolean | Disable reading from `.claude` (prompt + skills)  |
-| `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | boolean | Disable reading `~/.claude/CLAUDE.md`             |
-| `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | boolean | Disable loading `.claude/skills`                  |
-| `OPENCODE_DISABLE_MODELS_FETCH`       | boolean | Disable fetching models from remote sources       |
-| `OPENCODE_DISABLE_MOUSE`              | boolean | Disable mouse capture in the TUI                  |
-| `OPENCODE_FAKE_VCS`                   | string  | Fake VCS provider for testing purposes            |
-| `OPENCODE_CLIENT`                     | string  | Client identifier (defaults to `cli`)             |
-| `OPENCODE_ENABLE_EXA`                 | boolean | Enable Exa web search tools                       |
-| `OPENCODE_SERVER_PASSWORD`            | string  | Enable basic auth for `serve`/`web`               |
-| `OPENCODE_SERVER_USERNAME`            | string  | Override basic auth username (default `opencode`) |
-| `OPENCODE_MODELS_URL`                 | string  | Custom URL for fetching models configuration      |
+| Variable                              | Type    | Description                                                                |
+| ------------------------------------- | ------- | -------------------------------------------------------------------------- |
+| `OPENCODE_AUTO_SHARE`                 | boolean | Automatically share sessions                                               |
+| `OPENCODE_PURE`                       | boolean | Run without external plugins                                               |
+| `OPENCODE_GIT_BASH_PATH`              | string  | Path to Git Bash executable on Windows                                     |
+| `OPENCODE_CONFIG`                     | string  | Path to config file                                                        |
+| `OPENCODE_TUI_CONFIG`                 | string  | Path to TUI config file                                                    |
+| `OPENCODE_CONFIG_DIR`                 | string  | Path to config directory                                                   |
+| `OPENCODE_CONFIG_CONTENT`             | string  | Inline JSON config content                                                 |
+| `OPENCODE_DISABLE_PROJECT_CONFIG`     | boolean | Skip project config, instructions, and `.opencode` discovery               |
+| `OPENCODE_DISABLE_AUTOUPDATE`         | boolean | Disable automatic update checks                                            |
+| `OPENCODE_ALWAYS_NOTIFY_UPDATE`       | boolean | Emit an update-available event instead of auto-updating                    |
+| `OPENCODE_DISABLE_PRUNE`              | boolean | Disable pruning of old data                                                |
+| `OPENCODE_DISABLE_TERMINAL_TITLE`     | boolean | Disable automatic terminal title updates                                   |
+| `OPENCODE_PERMISSION`                 | string  | Inlined json permissions config                                            |
+| `OPENCODE_DISABLE_DEFAULT_PLUGINS`    | boolean | Disable default plugins                                                    |
+| `OPENCODE_DISABLE_EXTERNAL_SKILLS`    | boolean | Disable compatibility discovery from `.claude/skills` and `.agents/skills` |
+| `OPENCODE_DISABLE_EMBEDDED_WEB_UI`    | boolean | Disable serving the embedded web UI                                        |
+| `OPENCODE_DISABLE_LSP_DOWNLOAD`       | boolean | Disable automatic LSP server downloads                                     |
+| `OPENCODE_ENABLE_EXPERIMENTAL_MODELS` | boolean | Enable experimental models                                                 |
+| `OPENCODE_DISABLE_AUTOCOMPACT`        | boolean | Disable automatic context compaction                                       |
+| `OPENCODE_DISABLE_CLAUDE_CODE`        | boolean | Disable reading from `.claude` (prompt + skills)                           |
+| `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | boolean | Disable reading `~/.claude/CLAUDE.md`                                      |
+| `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | boolean | Disable loading `.claude/skills`                                           |
+| `OPENCODE_DISABLE_MODELS_FETCH`       | boolean | Disable fetching models from remote sources                                |
+| `OPENCODE_DISABLE_MOUSE`              | boolean | Disable mouse capture in the TUI                                           |
+| `OPENCODE_FAKE_VCS`                   | string  | Fake VCS provider for testing purposes                                     |
+| `OPENCODE_CLIENT`                     | string  | Client identifier (defaults to `cli`)                                      |
+| `OPENCODE_ENABLE_EXA`                 | boolean | Prefer Exa as the built-in web-search provider                             |
+| `OPENCODE_ENABLE_PARALLEL`            | boolean | Prefer Parallel as the built-in web-search provider                        |
+| `OPENCODE_WEBSEARCH_PROVIDER`         | string  | Force the built-in web-search provider to `exa` or `parallel`              |
+| `OPENCODE_ENABLE_QUESTION_TOOL`       | boolean | Expose the question tool to non-interactive clients                        |
+| `OPENCODE_SERVER_PASSWORD`            | string  | Enable basic auth for `serve`/`web`                                        |
+| `OPENCODE_SERVER_USERNAME`            | string  | Override basic auth username (default `opencode`)                          |
+| `OPENCODE_MODELS_URL`                 | string  | Custom URL for fetching models configuration                               |
+| `OPENCODE_MODELS_PATH`                | string  | Load models configuration from a local file                                |
+
+#### Advanced diagnostics and storage
+
+| Variable                      | Type    | Description                                         |
+| ----------------------------- | ------- | --------------------------------------------------- |
+| `OPENCODE_DB`                 | string  | Override the database path; supports `:memory:`     |
+| `OPENCODE_DISABLE_FFF`        | boolean | Force filesystem search to use the ripgrep fallback |
+| `OPENCODE_SHOW_TTFD`          | boolean | Show time-to-first-display diagnostics              |
+| `OPENCODE_AUTO_HEAP_SNAPSHOT` | boolean | Write a heap snapshot when RSS exceeds 2 GiB        |
 
 ---
 
@@ -711,23 +758,24 @@ OpenCode can be configured using environment variables.
 
 These environment variables enable experimental features that may change or be removed.
 
-| Variable                                        | Type    | Description                             |
-| ----------------------------------------------- | ------- | --------------------------------------- |
-| `OPENCODE_EXPERIMENTAL`                         | boolean | Enable the experimental umbrella flag   |
-| `OPENCODE_EXPERIMENTAL_ICON_DISCOVERY`          | boolean | Enable icon discovery                   |
-| `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT`  | boolean | Disable copy on select in TUI           |
-| `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` | number  | Default timeout for bash commands in ms |
-| `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`        | number  | Max output tokens for LLM responses     |
-| `OPENCODE_EXPERIMENTAL_FILEWATCHER`             | boolean | Enable file watcher for entire dir      |
-| `OPENCODE_EXPERIMENTAL_OXFMT`                   | boolean | Enable oxfmt formatter                  |
-| `OPENCODE_EXPERIMENTAL_LSP_TOOL`                | boolean | Enable experimental LSP tool            |
-| `OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER`     | boolean | Disable file watcher                    |
-| `OPENCODE_EXPERIMENTAL_EXA`                     | boolean | Enable experimental Exa features        |
-| `OPENCODE_EXPERIMENTAL_LSP_TY`                  | boolean | Enable TY LSP for python files          |
-| `OPENCODE_EXPERIMENTAL_PLAN_MODE`               | boolean | Enable plan mode                        |
-| `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`    | boolean | Enable background subagent tasks        |
-| `OPENCODE_EXPERIMENTAL_EVENT_SYSTEM`            | boolean | Enable experimental event system        |
-| `OPENCODE_EXPERIMENTAL_NATIVE_LLM`              | boolean | Enable native LLM request path          |
-| `OPENCODE_EXPERIMENTAL_PARALLEL`                | boolean | Enable parallel web search execution    |
-| `OPENCODE_EXPERIMENTAL_SCOUT`                   | boolean | Enable Scout subagent                   |
-| `OPENCODE_EXPERIMENTAL_WORKSPACES`              | boolean | Enable workspace support                |
+| Variable                                        | Type    | Description                                        |
+| ----------------------------------------------- | ------- | -------------------------------------------------- |
+| `OPENCODE_EXPERIMENTAL`                         | boolean | Enable the experimental umbrella flag              |
+| `OPENCODE_EXPERIMENTAL_ICON_DISCOVERY`          | boolean | Enable icon discovery                              |
+| `OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT`  | boolean | Disable copy on select in TUI                      |
+| `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` | number  | Default timeout for bash commands in ms            |
+| `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`        | number  | Max output tokens for LLM responses                |
+| `OPENCODE_EXPERIMENTAL_FILEWATCHER`             | boolean | Enable file watcher for entire dir                 |
+| `OPENCODE_EXPERIMENTAL_OXFMT`                   | boolean | Enable oxfmt formatter                             |
+| `OPENCODE_EXPERIMENTAL_LSP_TOOL`                | boolean | Enable experimental LSP tool                       |
+| `OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER`     | boolean | Disable file watcher                               |
+| `OPENCODE_EXPERIMENTAL_EXA`                     | boolean | Legacy alias for `OPENCODE_ENABLE_EXA`             |
+| `OPENCODE_EXPERIMENTAL_LSP_TY`                  | boolean | Enable TY LSP for python files                     |
+| `OPENCODE_EXPERIMENTAL_PLAN_MODE`               | boolean | Enable plan mode                                   |
+| `OPENCODE_EXPERIMENTAL_CODE_MODE`               | boolean | Enable code mode tools                             |
+| `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`    | boolean | Enable background subagent tasks                   |
+| `OPENCODE_EXPERIMENTAL_EVENT_SYSTEM`            | boolean | Enable experimental event system                   |
+| `OPENCODE_EXPERIMENTAL_NATIVE_LLM`              | boolean | Enable native LLM request path                     |
+| `OPENCODE_EXPERIMENTAL_WEBSOCKETS`              | boolean | Enable the experimental OpenAI WebSocket transport |
+| `OPENCODE_EXPERIMENTAL_PARALLEL`                | boolean | Legacy alias for `OPENCODE_ENABLE_PARALLEL`        |
+| `OPENCODE_EXPERIMENTAL_WORKSPACES`              | boolean | Enable workspace support                           |
