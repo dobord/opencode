@@ -107,6 +107,36 @@ test("keeps checking until stale reset-delay callbacks can no longer win", async
   }
 })
 
+test("reconciles a connected move when mutation additions precede removals", () => {
+  const frame = openFrame()
+  const targetWindow = frame.targetWindow
+  const mutations = controlledMutations(targetWindow)
+  const animation = controlledAnimationFrames(targetWindow)
+  const route = targetWindow.document.createElement("section")
+  const viewport = targetWindow.document.createElement("div")
+  const destination = targetWindow.document.createElement("section")
+  route.append(viewport)
+  targetWindow.document.body.append(route, destination)
+  const instance = attachedVirtualizer(viewport, { scrollOffset: 240, isScrollingResetDelay: 0 })
+  const connections: boolean[] = []
+  const cleanup = observeElementOffsetReconnectAware(
+    instance,
+    (offset) => {
+      instance.scrollOffset = offset
+    },
+    () => connections.push(viewport.isConnected),
+  )
+  try {
+    mutations.move(destination, route)
+    animation.run(16)
+    expect(connections).toEqual([true])
+    expect(instance.scrollOffset).toBe(0)
+  } finally {
+    cleanup()
+    frame.close()
+  }
+})
+
 test("settles on the live offset after a write whose scroll event is still pending", async () => {
   const route = document.createElement("section")
   const viewport = document.createElement("div")
@@ -208,7 +238,7 @@ async function frames(count: number, targetWindow: Window = window) {
 }
 
 function controlledMutations(targetWindow: Window & typeof globalThis) {
-  let flush: () => void = () => {
+  let flush: (reverse?: boolean) => void = () => {
     throw new Error("Mutation observer is not active")
   }
 
@@ -216,13 +246,20 @@ function controlledMutations(targetWindow: Window & typeof globalThis) {
   class ControlledMutationObserver extends targetWindow.MutationObserver {
     constructor(callback: MutationCallback) {
       super(callback)
-      flush = () => callback(this.takeRecords(), this)
+      flush = (reverse) => {
+        const records = this.takeRecords()
+        callback(reverse ? records.toReversed() : records, this)
+      }
     }
   }
 
   Object.defineProperty(targetWindow, "MutationObserver", { value: ControlledMutationObserver })
 
   return {
+    move(parent: Node, node: Node) {
+      parent.appendChild(node)
+      flush(true)
+    },
     append(parent: Node, node: Node) {
       parent.appendChild(node)
       flush()
