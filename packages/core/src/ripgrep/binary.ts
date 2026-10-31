@@ -9,6 +9,7 @@ import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { httpClient } from "@opencode/util/effect/app-node-platform"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
+import { EffectFlock } from "@opencode/util/effect-flock"
 import { which } from "../util/which.js"
 
 export namespace RipgrepBinary {
@@ -66,6 +67,7 @@ export namespace RipgrepBinary {
       const http = HttpClient.filterStatusOk(yield* HttpClient.HttpClient)
       const spawner = yield* ChildProcessSpawner
       const global = yield* Global.Service
+      const flock = yield* EffectFlock.Service
       const findExecutable = (name: string) => which(name, undefined, global.bin)
 
       const run = Effect.fnUntraced(function* (command: string, args: string[], cwd: string) {
@@ -146,7 +148,7 @@ export namespace RipgrepBinary {
             yield* extract(archive, config, target)
             yield* fs.remove(archive, { force: true }).pipe(Effect.ignore)
             return target
-          }),
+          }).pipe(flock.withLock("ripgrep-provision")),
         ),
       })
     }),
@@ -161,6 +163,6 @@ export namespace RipgrepBinary {
   export const node = makeGlobalNode({
     service: Service,
     layer: layer,
-    deps: [FSUtil.node, Global.node, httpClient, CrossSpawnSpawner.node],
+    deps: [FSUtil.node, Global.node, httpClient, CrossSpawnSpawner.node, EffectFlock.node],
   })
 }

@@ -146,7 +146,7 @@ const layer = Layer.effect(
               const worktree = existing ? yield* fs.resolve(localPath) : undefined
               const reuse = Boolean(
                 existing &&
-                  existing.worktree === worktree &&
+                  samePath(existing.worktree, worktree) &&
                   originReference &&
                   Repository.same(originReference, cloneTarget),
               )
@@ -240,6 +240,14 @@ export const node = makeGlobalNode({
 
 function errorMessage(error: unknown) {
   return error instanceof globalThis.Error ? error.message : String(error)
+}
+
+function samePath(left: string, right: string | undefined) {
+  if (!right) return false
+  const a = path.normalize(path.resolve(left))
+  const b = path.normalize(path.resolve(right))
+  // Git and realpath can disagree about Windows drive-letter casing.
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b
 }
 
 function cacheOperation<A, E, R>(effect: Effect.Effect<A, E, R>, operation: string, target: string) {
