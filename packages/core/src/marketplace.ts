@@ -1,5 +1,9 @@
 import semver from "semver"
-import { parseForeignMarketplaceCatalog, type ForeignMarketplacePlugin } from "./marketplace/foreign.js"
+import {
+  enrichForeignMarketplaceCatalog,
+  parseForeignMarketplaceCatalog,
+  type ForeignMarketplacePlugin,
+} from "./marketplace/foreign.js"
 
 export type MarketplaceKind = "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
 export type MarketplaceTrust = "official" | "verified" | "community" | "private"
@@ -431,7 +435,13 @@ async function fetchMarketplaceCatalog(fetcher: MarketplaceFetch, source: Market
     const digest = response.headers.get("x-opencode-artifact-digest") ?? undefined
     const value = await readCatalogResponse(response)
     const foreign = parseForeignMarketplaceCatalog(value, url)
-    const catalog = foreign ?? resolveCatalogAssets(parseMarketplaceCatalog(value), url)
+    const catalog = foreign
+      ? await enrichForeignMarketplaceCatalog(
+          foreign,
+          (input, init) => fetcher(input, { ...init, headers: source.headers }),
+          AbortSignal.timeout(timeout),
+        )
+      : resolveCatalogAssets(parseMarketplaceCatalog(value), url)
     return { catalog, url, digest }
   }
   const urls = marketplaceCatalogURLs(source.url)

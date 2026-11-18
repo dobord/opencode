@@ -125,7 +125,90 @@ describe("foreign marketplace catalogs", () => {
       expect(listing?.catalog_url).toBe(`https://raw.githubusercontent.com/${repo}/HEAD/${file}`)
     }
     expect(requests.some((url) => url.endsWith("/.opencode/marketplace.json"))).toBe(true)
-    expect(requests.every((url) => !url.includes("plugin.json"))).toBe(true)
+    expect(requests.filter((url) => url.endsWith("plugin.json"))).toHaveLength(format === "codex" ? 2 : 0)
+    expect(requests.every((url) => !url.includes("/git/trees/") && !url.includes("SKILL.md"))).toBe(true)
+  })
+
+  test("loads Codex logos from plugin-root assets, keeps the install identity, and tolerates missing metadata", async () => {
+    const source = createMarketplaceSource({ url: "https://github.com/acme/plugins" })
+    const requests: string[] = []
+    const result = await loadMarketplace({
+      config: { marketplace: { sources: [source] } },
+      fetch: async (input) => {
+        const url = String(input)
+        requests.push(url)
+        if (url.endsWith("/.agents/plugins/marketplace.json"))
+          return Response.json({
+            name: "catalog",
+            plugins: [
+              { name: "gmail", source: { source: "local", path: "./plugins/gmail" } },
+              { name: "missing", source: { source: "local", path: "./plugins/missing" } },
+            ],
+          })
+        if (url.endsWith("/plugins/gmail/.codex-plugin/plugin.json"))
+          return Response.json({
+            name: "gmail",
+            version: "0.1.9",
+            interface: {
+              displayName: "Gmail",
+              shortDescription: "Read and manage Gmail",
+              logo: { "src-light": "./assets/light.png", "src-dark": "./assets/dark.svg" },
+              brandColor: "#EA4335",
+            },
+          })
+        return new Response("not found", { status: 404 })
+      },
+    })
+    expect(result.errors).toEqual([])
+    const gmail = result.listings.find((listing) => listing.item.id === "gmail")!
+    expect(gmail.item).toMatchObject({
+      name: "Gmail",
+      description: "Read and manage Gmail",
+      version: "0.1.9",
+      brand_color: "#EA4335",
+      icon: {
+        "src-light": "https://raw.githubusercontent.com/acme/plugins/HEAD/plugins/gmail/assets/light.png",
+        "src-dark": "https://raw.githubusercontent.com/acme/plugins/HEAD/plugins/gmail/assets/dark.svg",
+      },
+    })
+    expect(gmail.key).toBe(`${source.id}:catalog:gmail`)
+    expect(gmail.item.install.foreign?.entry.name).toBe("gmail")
+    expect(result.listings.find((listing) => listing.item.id === "missing")?.item.icon).toBeUndefined()
+    expect(requests.filter((url) => url.endsWith("/plugin.json"))).toHaveLength(2)
+  })
+
+  test.each(["claude", "copilot", "codex"] as const)("preserves inline %s logos and entry overrides", (format) => {
+    const file = format === "claude" ? ".claude-plugin" : format === "copilot" ? ".github/plugin" : ".agents/plugins"
+    const catalog = parseForeignMarketplaceCatalog(
+      {
+        name: "catalog",
+        plugins: [
+          { name: "mail", source: "./plugins/mail", interface: { displayName: "Mail", logo: "./assets/logo.png" } },
+        ],
+      },
+      `https://raw.githubusercontent.com/acme/plugins/HEAD/${file}/marketplace.json`,
+    )
+    expect(catalog?.items[0]).toMatchObject({
+      id: "mail",
+      name: "Mail",
+      icon: { "src-light": "https://raw.githubusercontent.com/acme/plugins/HEAD/plugins/mail/assets/logo.png" },
+    })
+  })
+
+  test.each([
+    "javascript:alert(1)",
+    "file:///etc/passwd",
+    "//example.com/logo.png",
+    "http://",
+    "https://user:secret@example.com/logo.png",
+    "../../../logo.png",
+  ])("ignores an unusable optional logo without hiding the listing: %s", (logo) => {
+    const catalog = parseForeignMarketplaceCatalog(
+      { name: "catalog", plugins: [{ name: "mail", source: "./plugins/mail", interface: { logo } }] },
+      "https://raw.githubusercontent.com/acme/plugins/HEAD/.agents/plugins/marketplace.json",
+    )
+    expect(catalog?.items[0].id).toBe("mail")
+    expect(catalog?.items[0].icon).toBeUndefined()
   })
 
   test("accepts the complete Anthropic community catalog size without truncation", () => {

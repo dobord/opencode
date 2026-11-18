@@ -22,6 +22,20 @@ it.live(
       const global = path.join(tmp.path, "global")
       const project = path.join(tmp.path, "project")
       const catalog = path.join(tmp.path, "catalog", "marketplace.json")
+      const logo = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNw6bj7HwAFZgKpFW1BjgAAAABJRU5ErkJggg=="
+      const imageRequests = { count: 0 }
+      const images = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            port: 0,
+            fetch() {
+              imageRequests.count++
+              return new Response(Buffer.from(logo, "base64"), { headers: { "content-type": "image/png" } })
+            },
+          }),
+        ),
+        (server) => Effect.sync(() => server.stop(true)),
+      )
       yield* Effect.promise(async () => {
         await Bun.write(path.join(project, ".keep"), "")
         await Bun.write(
@@ -39,6 +53,7 @@ it.live(
                 id: "commands",
                 name: "Commands",
                 description: "Local commands",
+                icon: { "src-light": images.url.href, "src-dark": images.url.href },
                 kind: "bundle",
                 version: "1.0.0",
                 install: { commands: { background_command: { template: "Hello" } } },
@@ -84,6 +99,17 @@ it.live(
       expect(source.status).toBe("succeeded")
       const snapshot = Schema.decodeUnknownSync(Marketplace.View)(yield* request(`${root}/snapshot`))
       expect(snapshot.source_status?.[0]?.status).toBe("ready")
+      expect(snapshot.listings.find((listing) => listing.item.id === "commands")?.item.icon).toEqual({
+        "src-light": `data:image/png;base64,${logo}`,
+        "src-dark": `data:image/png;base64,${logo}`,
+      })
+      const fetched = imageRequests.count
+      images.stop(true)
+      const offline = Schema.decodeUnknownSync(Marketplace.View)(yield* request(`${root}/snapshot`))
+      expect(offline.listings.find((listing) => listing.item.id === "commands")?.item.icon).toEqual(
+        snapshot.listings.find((listing) => listing.item.id === "commands")?.item.icon,
+      )
+      expect(imageRequests.count).toBe(fetched)
       const bypass = Schema.decodeUnknownSync(Marketplace.MutationResult)(
         yield* request(`${root}/source`, "POST", { expected_revision: 1, url: "../bypass" }),
       )

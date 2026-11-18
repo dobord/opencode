@@ -8,6 +8,7 @@ import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
 import { useServer } from "@/runtime/server/current"
 import { BackgroundMarketplacePanel } from "./background-panel"
+import { MarketplaceLogo } from "./logo"
 import { formatServerError } from "@/runtime/server/errors"
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -360,9 +361,7 @@ function LegacyMarketplacePanel() {
               return (
                 <section class="flex flex-col gap-2 border rounded p-3">
                   <div class="flex items-center gap-2">
-                    <Show when={listing.item.icon}>
-                      {(icon) => <img width="32" height="32" src={icon()["src-light"]} alt="" />}
-                    </Show>
+                    <MarketplaceLogo item={listing.item} />
                     <strong class="flex-1">{listing.item.name}</strong>
                     <span>{listing.item.version}</span>
                     <Show when={installed()}>

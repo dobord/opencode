@@ -180,6 +180,28 @@ function sourceHeaders(source: MarketplaceSource, target: string) {
   }
 }
 
+const cachedIcon = Effect.fnUntraced(function* (
+  cache: MarketplaceCache.Interface,
+  source: MarketplaceSource,
+  url: string,
+  mode: MarketplaceCache.CacheMode,
+) {
+  if (!/^(?:https?|file):/i.test(url)) return url
+  return yield* cache.fetchResponse({ url, headers: sourceHeaders(source, url), source, kind: "icon", mode }).pipe(
+    Effect.timeout("10 seconds"),
+    Effect.flatMap((response) =>
+      Effect.tryPromise(async () => {
+        const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase()
+        if (!type || !/^image\/(?:png|jpeg|webp|gif|svg\+xml|x-icon)$/.test(type)) return url
+        const bytes = await response.arrayBuffer()
+        if (bytes.byteLength > 256 * 1024) return url
+        return `data:${type};base64,${Buffer.from(bytes).toString("base64")}`
+      }),
+    ),
+    Effect.orElseSucceed(() => url),
+  )
+})
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -211,6 +233,34 @@ const layer = Layer.effect(
           { discard: true },
         )
       const statuses = yield* registry.statuses()
+      const listings = yield* Effect.forEach(
+        loaded.listings,
+        (listing) =>
+          Effect.gen(function* () {
+            const installed = state.installed?.[listing.key]
+            const item =
+              listing.item.install.foreign && installed
+                ? { ...listing.item, install: { ...clone(installed.plan), foreign: listing.item.install.foreign } }
+                : listing.item
+            const icons = yield* Effect.forEach(Object.entries(item.icon ?? {}), ([variant, url]) =>
+              Effect.gen(function* () {
+                const result = yield* cachedIcon(
+                  cache,
+                  listing.source,
+                  url,
+                  refresh ? "refresh" : cached ? "cache-only" : "cache-first",
+                )
+                return [variant, result] as const
+              }),
+            )
+            return {
+              ...publicListing(listing),
+              item: { ...item, ...(item.icon ? { icon: { ...item.icon, ...Object.fromEntries(icons) } } : {}) },
+              status: marketplaceStatus({ marketplace: state }, listing),
+            }
+          }),
+        { concurrency: 4 },
+      )
       return {
         source_status: marketplaceSources({ marketplace: state }).map((source) =>
           source.enabled === false
@@ -218,21 +268,7 @@ const layer = Layer.effect(
             : (statuses.find((status) => status.id === source.id) ?? { id: source.id, status: "checking" as const }),
         ),
         state: publicState(state),
-        listings: loaded.listings.map((listing) => {
-          const installed = state.installed?.[listing.key]
-          return {
-            ...publicListing(listing),
-            ...(listing.item.install.foreign && installed
-              ? {
-                  item: {
-                    ...listing.item,
-                    install: { ...clone(installed.plan), foreign: listing.item.install.foreign },
-                  },
-                }
-              : {}),
-            status: marketplaceStatus({ marketplace: state }, listing),
-          }
-        }),
+        listings,
         errors: loaded.errors.map((error) => ({ ...error, source: publicSource(error.source) })),
         cache: yield* cache.summary(),
       } satisfies MarketplaceView
@@ -276,8 +312,8 @@ const layer = Layer.effect(
     const preview = Effect.fn("MarketplaceService.preview")(function* (key: string) {
       yield* MarketplaceOperationContext.phase("resolving")
       const state = yield* registry.read()
-      const view = yield* loadView(state, false)
-      const listing = view.listings.find((candidate) => candidate.key === key)
+      // Consent is bound to catalog metadata, never to the cached image representation sent to the UI.
+      const listing = yield* findListing(state, key, false)
       if (!listing) {
         return {
           ok: false,

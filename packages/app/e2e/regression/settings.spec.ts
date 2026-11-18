@@ -61,6 +61,49 @@ const patched = (page: Page) =>
     (request) => request.method() === "PATCH" && new URL(request.url()).pathname === `/api/project/${projectID}`,
   )
 
+test("Marketplace renders theme-aware logos and falls back when an image fails", async ({ page }) => {
+  const light =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNw6bj7HwAFZgKpFW1BjgAAAABJRU5ErkJggg=="
+  const dark =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGNw6bj7H4QBFWsFUYjksb8AAAAASUVORK5CYII="
+  await page.emulateMedia({ colorScheme: "light" })
+  const { settings } = await open(page, {
+    marketplace: {
+      view: {
+        state: { revision: 1 },
+        errors: [],
+        cache: { root: "cache", objects: 0, total_bytes: 0, fetch_entries: 0, materializations: 0 },
+        listings: [
+          { id: "gmail", name: "Gmail", icon: { "src-light": light, "src-dark": dark } },
+          { id: "broken", name: "Broken logo", icon: { "src-light": "data:image/png;base64,broken" } },
+          { id: "missing", name: "Missing logo" },
+          { id: "single", name: "Single logo", icon: { "src-light": light } },
+        ].map((item) => ({
+          key: `catalog:${item.id}`,
+          source: { id: "catalog", name: "Catalog", url: "https://example.com/catalog.json" },
+          catalog: { schema: "opencode.marketplace/v1" as const, id: "catalog", name: "Catalog", items: [] },
+          item: { ...item, description: item.name, kind: "bundle" as const, version: "1.0.0", install: {} },
+        })),
+      },
+      operations: [],
+    },
+  })
+  await settings.getByRole("tab", { name: "Extensions", exact: true }).click()
+  await settings.getByRole("button", { name: "Marketplace", exact: true }).click()
+  const card = (name: string) =>
+    page.locator("section").filter({ has: page.locator("strong").filter({ hasText: new RegExp(`^${name}$`) }) })
+  const logo = card("Gmail").locator("img")
+  await expect(logo).toBeVisible()
+  await expect(logo).toHaveJSProperty("naturalWidth", 1)
+  await expect(card("Broken logo").locator("img")).toHaveCount(0)
+  await expect(card("Broken logo").getByText("B", { exact: true })).toBeVisible()
+  await expect(card("Missing logo").getByText("M", { exact: true })).toBeVisible()
+  await page.emulateMedia({ colorScheme: "dark" })
+  await expect(logo).toHaveAttribute("src", dark)
+  await expect(logo).toHaveJSProperty("naturalWidth", 2)
+  await expect(card("Single logo").locator("img")).toHaveAttribute("src", light)
+})
+
 test("Marketplace operations remain accessible in its dialog, outside settings, and after reload", async ({ page }) => {
   const { settings } = await open(page, {
     marketplace: {

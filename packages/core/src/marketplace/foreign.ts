@@ -1,6 +1,11 @@
 import path from "path"
 import { ConfigMarkdown } from "../config/markdown.js"
-import type { MarketplaceCatalog, MarketplaceFetch, MarketplaceInstallPlan } from "../marketplace.js"
+import type {
+  MarketplaceCatalog,
+  MarketplaceFetch,
+  MarketplaceInstallPlan,
+  MarketplaceCatalogItem,
+} from "../marketplace.js"
 
 export type ForeignMarketplacePlugin = {
   format: "claude" | "copilot" | "codex"
@@ -70,6 +75,7 @@ export function parseForeignMarketplaceCatalog(value: unknown, url: string): Mar
         description: optionalText(entry.description) ?? `${name} (${format} plugin bundle)`,
         kind: "bundle",
         version: optionalText(entry.version) ?? "unversioned",
+        ...presentation(entry, { format, catalog_url: url, entry }),
         ...(optionalText(author?.name) ? { publisher: { name: requiredText(author?.name, "author.name") } } : {}),
         ...(optionalText(entry.homepage)?.startsWith("https://") ? { homepage: optionalText(entry.homepage) } : {}),
         setup: [
@@ -79,6 +85,88 @@ export function parseForeignMarketplaceCatalog(value: unknown, url: string): Mar
       }
     }),
   }
+}
+
+/** Codex keeps display metadata in each plugin's manifest, not in the catalog index. */
+export async function enrichForeignMarketplaceCatalog(
+  catalog: MarketplaceCatalog,
+  fetcher: MarketplaceFetch,
+  signal: AbortSignal,
+): Promise<MarketplaceCatalog> {
+  const items: MarketplaceCatalogItem[] = []
+  // Bound raw-GitHub traffic, and share one deadline for the entire optional metadata pass.
+  for (const batch of Array.from({ length: Math.ceil(catalog.items.length / 4) }, (_, index) =>
+    catalog.items.slice(index * 4, index * 4 + 4),
+  )) {
+    items.push(
+      ...(await Promise.all(
+        batch.map(async (item) => {
+          const plugin = item.install.foreign
+          if (plugin?.format !== "codex" || signal.aborted) return item
+          try {
+            const location = pluginLocation(plugin)
+            const response = await fetcher(repositoryAsset(location, ".codex-plugin/plugin.json"), { signal })
+            if (!response.ok) return item
+            const manifest = object(await response.json(), "plugin manifest")
+            const display = manifest.interface === undefined ? {} : object(manifest.interface, "plugin.interface")
+            const override =
+              plugin.entry.interface === undefined ? {} : object(plugin.entry.interface, "plugin.interface")
+            return {
+              ...item,
+              ...presentation({ ...manifest, ...plugin.entry, interface: { ...display, ...override } }, plugin),
+            }
+          } catch {
+            // Missing, uncached or malformed optional metadata must not hide an installable listing.
+            return item
+          }
+        }),
+      )),
+    )
+  }
+  return { ...catalog, items }
+}
+
+function presentation(
+  config: Record<string, unknown>,
+  plugin: ForeignMarketplacePlugin,
+): Partial<MarketplaceCatalogItem> {
+  const display = config.interface === undefined ? {} : object(config.interface, "plugin.interface")
+  const name = optionalText(display.displayName)
+  const description = optionalText(display.shortDescription) ?? optionalText(config.description)
+  const version = optionalText(config.version)
+  const logo = display.logo ?? display.composerIcon ?? config.icon
+  const icon =
+    typeof logo === "string" ? { "src-light": logo } : logo === undefined ? undefined : object(logo, "plugin logo")
+  const asset = (value: unknown) => {
+    const text = optionalText(value)
+    if (!text) return undefined
+    if (/^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(text)) return text
+    if (/^https?:\/\//i.test(text)) {
+      if (!URL.canParse(text)) return undefined
+      const url = new URL(text)
+      return url.username || url.password ? undefined : url.href
+    }
+    if (/^[a-z][a-z\d+.-]*:/i.test(text) || text.startsWith("//")) return undefined
+    if (path.posix.isAbsolute(text) || /[\\\u0000]/.test(text)) return undefined
+    const location = pluginLocation(plugin)
+    const target = path.posix.normalize(path.posix.join(location.path, text))
+    if (target === ".." || target.startsWith("../")) return undefined
+    return repositoryAsset(location, text)
+  }
+  const light = asset(icon?.["src-light"])
+  const dark = asset(icon?.["src-dark"])
+  const color = optionalText(display.brandColor)
+  return {
+    ...(name ? { name } : {}),
+    ...(description ? { description } : {}),
+    ...(version ? { version } : {}),
+    ...(light ? { icon: { "src-light": light, ...(dark ? { "src-dark": dark } : {}) } } : {}),
+    ...(color && /^#[a-f\d]{6}$/i.test(color) ? { brand_color: color } : {}),
+  }
+}
+
+function repositoryAsset(location: ReturnType<typeof pluginLocation>, file: string) {
+  return `https://raw.githubusercontent.com/${location.repo}/${encodeURIComponent(location.ref)}/${repositoryPath(location.path, file).split("/").map(encodeURIComponent).join("/")}`
 }
 
 export async function resolveForeignMarketplacePlan(

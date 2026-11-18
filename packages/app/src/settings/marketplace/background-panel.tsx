@@ -9,6 +9,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { view, type Command } from "./operations-machine"
 import { OperationCard, OperationList } from "./operations-center"
 import { OperationStatus } from "./operation-status"
+import { MarketplaceLogo } from "./logo"
 
 export function BackgroundMarketplacePanel() {
   const controller = useServer().ctx.marketplace
@@ -142,6 +143,7 @@ export function BackgroundMarketplacePanel() {
                   return (
                     <section class="flex flex-col gap-2 rounded border p-3">
                       <div class="flex items-center gap-2">
+                        <MarketplaceLogo item={listing.item} />
                         <strong class="flex-1">
                           <bdi>{listing.item.name}</bdi>
                         </strong>
