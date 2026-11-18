@@ -326,6 +326,30 @@ import type {
   ConfigShellsOutput,
   ExperimentalConfigUpdateInput,
   ExperimentalConfigUpdateOutput,
+  ExperimentalMarketplaceGetInput,
+  ExperimentalMarketplaceGetOutput,
+  ExperimentalMarketplaceRefreshInput,
+  ExperimentalMarketplaceRefreshOutput,
+  ExperimentalMarketplacePlanInput,
+  ExperimentalMarketplacePlanOutput,
+  ExperimentalMarketplaceInstallInput,
+  ExperimentalMarketplaceInstallOutput,
+  ExperimentalMarketplaceUpdateAllInput,
+  ExperimentalMarketplaceUpdateAllOutput,
+  ExperimentalMarketplaceUninstallInput,
+  ExperimentalMarketplaceUninstallOutput,
+  ExperimentalMarketplaceToggleInput,
+  ExperimentalMarketplaceToggleOutput,
+  ExperimentalMarketplaceSourceAddInput,
+  ExperimentalMarketplaceSourceAddOutput,
+  ExperimentalMarketplaceSourceToggleInput,
+  ExperimentalMarketplaceSourceToggleOutput,
+  ExperimentalMarketplaceSourceRemoveInput,
+  ExperimentalMarketplaceSourceRemoveOutput,
+  ExperimentalMarketplaceProfileExportInput,
+  ExperimentalMarketplaceProfileExportOutput,
+  ExperimentalMarketplaceCachePruneInput,
+  ExperimentalMarketplaceCachePruneOutput,
 } from "./types.js"
 import { ClientError } from "./client-error.js"
 
@@ -1795,6 +1819,182 @@ export function make(options: ClientOptions) {
               successStatus: 204,
               declaredStatuses: [400, 401, 404],
               empty: true,
+            },
+            requestOptions,
+          ),
+      },
+      marketplace: {
+        get: (input?: ExperimentalMarketplaceGetInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceGetOutput>(
+            {
+              method: "GET",
+              path: `/api/experimental/marketplace`,
+              query: { location: input?.["location"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        refresh: (input?: ExperimentalMarketplaceRefreshInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceRefreshOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/refresh`,
+              query: { location: input?.["location"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        plan: (input: ExperimentalMarketplacePlanInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplacePlanOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/plan`,
+              query: { location: input["location"] },
+              body: { key: input["key"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        install: (input: ExperimentalMarketplaceInstallInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceInstallOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/install`,
+              query: { location: input["location"] },
+              body: {
+                key: input["key"],
+                expected_revision: input["expected_revision"],
+                force: input["force"],
+                accept_untrusted: input["accept_untrusted"],
+              },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        updateAll: (input: ExperimentalMarketplaceUpdateAllInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceUpdateAllOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/update-all`,
+              query: { location: input["location"] },
+              body: {
+                expected_revision: input["expected_revision"],
+                force: input["force"],
+                accept_untrusted: input["accept_untrusted"],
+              },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        uninstall: (input: ExperimentalMarketplaceUninstallInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceUninstallOutput>(
+            {
+              method: "DELETE",
+              path: `/api/experimental/marketplace/install/${encodeURIComponent(input.key)}`,
+              query: { location: input["location"] },
+              body: { expected_revision: input["expected_revision"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        toggle: (input: ExperimentalMarketplaceToggleInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceToggleOutput>(
+            {
+              method: "PATCH",
+              path: `/api/experimental/marketplace/install/${encodeURIComponent(input.key)}`,
+              query: { location: input["location"] },
+              body: {
+                expected_revision: input["expected_revision"],
+                component: input["component"],
+                id: input["id"],
+                enabled: input["enabled"],
+              },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        sourceAdd: (input: ExperimentalMarketplaceSourceAddInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceSourceAddOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/source`,
+              query: { location: input["location"] },
+              body: {
+                expected_revision: input["expected_revision"],
+                url: input["url"],
+                name: input["name"],
+                trust: input["trust"],
+                headers: input["headers"],
+              },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        sourceToggle: (input: ExperimentalMarketplaceSourceToggleInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceSourceToggleOutput>(
+            {
+              method: "PATCH",
+              path: `/api/experimental/marketplace/source/${encodeURIComponent(input.id)}`,
+              query: { location: input["location"] },
+              body: { expected_revision: input["expected_revision"], enabled: input["enabled"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        sourceRemove: (input: ExperimentalMarketplaceSourceRemoveInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceSourceRemoveOutput>(
+            {
+              method: "DELETE",
+              path: `/api/experimental/marketplace/source/${encodeURIComponent(input.id)}`,
+              query: { location: input["location"] },
+              body: { expected_revision: input["expected_revision"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        profileExport: (input?: ExperimentalMarketplaceProfileExportInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceProfileExportOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/profile`,
+              query: { location: input?.["location"] },
+              body: { name: input?.["name"], description: input?.["description"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        cachePrune: (input?: ExperimentalMarketplaceCachePruneInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceCachePruneOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/marketplace/cache/prune`,
+              query: { location: input?.["location"] },
+              body: { max_age_days: input?.["max_age_days"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false,
             },
             requestOptions,
           ),

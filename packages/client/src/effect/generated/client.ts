@@ -322,6 +322,30 @@ import type {
   ConfigShellsOutput,
   ExperimentalConfigUpdateInput,
   ExperimentalConfigUpdateOutput,
+  ExperimentalMarketplaceGetInput,
+  ExperimentalMarketplaceGetOutput,
+  ExperimentalMarketplaceRefreshInput,
+  ExperimentalMarketplaceRefreshOutput,
+  ExperimentalMarketplacePlanInput,
+  ExperimentalMarketplacePlanOutput,
+  ExperimentalMarketplaceInstallInput,
+  ExperimentalMarketplaceInstallOutput,
+  ExperimentalMarketplaceUpdateAllInput,
+  ExperimentalMarketplaceUpdateAllOutput,
+  ExperimentalMarketplaceUninstallInput,
+  ExperimentalMarketplaceUninstallOutput,
+  ExperimentalMarketplaceToggleInput,
+  ExperimentalMarketplaceToggleOutput,
+  ExperimentalMarketplaceSourceAddInput,
+  ExperimentalMarketplaceSourceAddOutput,
+  ExperimentalMarketplaceSourceToggleInput,
+  ExperimentalMarketplaceSourceToggleOutput,
+  ExperimentalMarketplaceSourceRemoveInput,
+  ExperimentalMarketplaceSourceRemoveOutput,
+  ExperimentalMarketplaceProfileExportInput,
+  ExperimentalMarketplaceProfileExportOutput,
+  ExperimentalMarketplaceCachePruneInput,
+  ExperimentalMarketplaceCachePruneOutput,
 } from "../api/api.js"
 import { ClientError } from "./client-error.js"
 
@@ -1997,6 +2021,146 @@ const adaptGroupExperimentalConfig = (raw: RawClient["server.config"]) => ({
   update: EndpointExperimentalConfigUpdate(raw),
 })
 
+const EndpointExperimentalMarketplaceGet =
+  (raw: RawClient["server.experimental.marketplace"]) => (input?: ExperimentalMarketplaceGetInput) =>
+    preserveEffect<ExperimentalMarketplaceGetOutput>()(
+      raw["marketplace.get"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceRefresh =
+  (raw: RawClient["server.experimental.marketplace"]) => (input?: ExperimentalMarketplaceRefreshInput) =>
+    preserveEffect<ExperimentalMarketplaceRefreshOutput>()(
+      raw["marketplace.refresh"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplacePlan =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplacePlanInput) =>
+    preserveEffect<ExperimentalMarketplacePlanOutput>()(
+      raw["marketplace.plan"]({ query: { location: input["location"] }, payload: { key: input["key"] } }).pipe(
+        Effect.mapError(mapClientError),
+      ),
+    )
+
+const EndpointExperimentalMarketplaceInstall =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceInstallInput) =>
+    preserveEffect<ExperimentalMarketplaceInstallOutput>()(
+      raw["marketplace.install"]({
+        query: { location: input["location"] },
+        payload: {
+          key: input["key"],
+          expected_revision: input["expected_revision"],
+          force: input["force"],
+          accept_untrusted: input["accept_untrusted"],
+        },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceUpdateAll =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceUpdateAllInput) =>
+    preserveEffect<ExperimentalMarketplaceUpdateAllOutput>()(
+      raw["marketplace.updateAll"]({
+        query: { location: input["location"] },
+        payload: {
+          expected_revision: input["expected_revision"],
+          force: input["force"],
+          accept_untrusted: input["accept_untrusted"],
+        },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceUninstall =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceUninstallInput) =>
+    preserveEffect<ExperimentalMarketplaceUninstallOutput>()(
+      raw["marketplace.uninstall"]({
+        params: { key: input["key"] },
+        query: { location: input["location"] },
+        payload: { expected_revision: input["expected_revision"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceToggle =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceToggleInput) =>
+    preserveEffect<ExperimentalMarketplaceToggleOutput>()(
+      raw["marketplace.toggle"]({
+        params: { key: input["key"] },
+        query: { location: input["location"] },
+        payload: {
+          expected_revision: input["expected_revision"],
+          component: input["component"],
+          id: input["id"],
+          enabled: input["enabled"],
+        },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceSourceAdd =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceSourceAddInput) =>
+    preserveEffect<ExperimentalMarketplaceSourceAddOutput>()(
+      raw["marketplace.sourceAdd"]({
+        query: { location: input["location"] },
+        payload: {
+          expected_revision: input["expected_revision"],
+          url: input["url"],
+          name: input["name"],
+          trust: input["trust"],
+          headers: input["headers"],
+        },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceSourceToggle =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceSourceToggleInput) =>
+    preserveEffect<ExperimentalMarketplaceSourceToggleOutput>()(
+      raw["marketplace.sourceToggle"]({
+        params: { id: input["id"] },
+        query: { location: input["location"] },
+        payload: { expected_revision: input["expected_revision"], enabled: input["enabled"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceSourceRemove =
+  (raw: RawClient["server.experimental.marketplace"]) => (input: ExperimentalMarketplaceSourceRemoveInput) =>
+    preserveEffect<ExperimentalMarketplaceSourceRemoveOutput>()(
+      raw["marketplace.sourceRemove"]({
+        params: { id: input["id"] },
+        query: { location: input["location"] },
+        payload: { expected_revision: input["expected_revision"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceProfileExport =
+  (raw: RawClient["server.experimental.marketplace"]) => (input?: ExperimentalMarketplaceProfileExportInput) =>
+    preserveEffect<ExperimentalMarketplaceProfileExportOutput>()(
+      raw["marketplace.profileExport"]({
+        query: { location: input?.["location"] },
+        payload: { name: input?.["name"], description: input?.["description"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const EndpointExperimentalMarketplaceCachePrune =
+  (raw: RawClient["server.experimental.marketplace"]) => (input?: ExperimentalMarketplaceCachePruneInput) =>
+    preserveEffect<ExperimentalMarketplaceCachePruneOutput>()(
+      raw["marketplace.cachePrune"]({
+        query: { location: input?.["location"] },
+        payload: { max_age_days: input?.["max_age_days"] },
+      }).pipe(Effect.mapError(mapClientError)),
+    )
+
+const adaptGroupExperimentalMarketplace = (raw: RawClient["server.experimental.marketplace"]) => ({
+  get: EndpointExperimentalMarketplaceGet(raw),
+  refresh: EndpointExperimentalMarketplaceRefresh(raw),
+  plan: EndpointExperimentalMarketplacePlan(raw),
+  install: EndpointExperimentalMarketplaceInstall(raw),
+  updateAll: EndpointExperimentalMarketplaceUpdateAll(raw),
+  uninstall: EndpointExperimentalMarketplaceUninstall(raw),
+  toggle: EndpointExperimentalMarketplaceToggle(raw),
+  sourceAdd: EndpointExperimentalMarketplaceSourceAdd(raw),
+  sourceToggle: EndpointExperimentalMarketplaceSourceToggle(raw),
+  sourceRemove: EndpointExperimentalMarketplaceSourceRemove(raw),
+  profileExport: EndpointExperimentalMarketplaceProfileExport(raw),
+  cachePrune: EndpointExperimentalMarketplaceCachePrune(raw),
+})
+
 const adaptClient = (raw: RawClient) => {
   const client = {
     server: adaptGroupServer(raw["server.server"]),
@@ -2015,6 +2179,7 @@ const adaptClient = (raw: RawClient) => {
       migration: adaptGroupExperimentalMigration(raw["server.migration"]),
       usage: adaptGroupExperimentalUsage(raw["server.usage"]),
       config: adaptGroupExperimentalConfig(raw["server.config"]),
+      marketplace: adaptGroupExperimentalMarketplace(raw["server.experimental.marketplace"]),
     },
     message: adaptGroupMessage(raw["server.message"]),
     model: adaptGroupModel(raw["server.model"]),

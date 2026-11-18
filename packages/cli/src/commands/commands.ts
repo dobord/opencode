@@ -68,6 +68,19 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
     prompt: Flag.String("prompt").pipe(Flag.withDescription("Prompt to use"), Flag.optional),
   },
   commands: [
+    Spec.make("marketplace", {
+      description: "Manage Marketplace catalogs, packages, components, and artifact cache",
+      globalFlags: ServerFlags,
+      params: {
+        action: Argument.String("action").pipe(Argument.withDescription("list, refresh, plan, install, uninstall, update-all, toggle, source-add, source-remove, source-toggle, profile, or prune")),
+        target: Argument.String("target").pipe(Argument.optional),
+        force: Flag.Boolean("force").pipe(Flag.withDefault(false)),
+        acceptUntrusted: Flag.Boolean("accept-untrusted").pipe(Flag.withDefault(false)),
+        disabled: Flag.Boolean("disabled").pipe(Flag.withDefault(false)),
+        component: Flag.Literals("component", ["package", "skill", "mcp"]).pipe(Flag.withDefault("package")),
+        id: Flag.String("id").pipe(Flag.optional),
+      },
+    }),
     Spec.make("upgrade", {
       description: "Upgrade OpenCode to the latest or a specific version",
       aliases: ["update"],

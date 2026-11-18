@@ -26,6 +26,7 @@ import { Integration } from "@opencode/schema/integration"
 import { Job } from "@opencode/schema/job"
 import { Location } from "@opencode/schema/location"
 import { Mcp } from "@opencode/schema/mcp"
+import { Marketplace } from "@opencode/schema/marketplace"
 import { Model } from "@opencode/schema/model"
 import { Money } from "@opencode/schema/money"
 import { Permission } from "@opencode/schema/permission"
@@ -86,6 +87,7 @@ const effectTypeReferences = [
   typeReference("Location.PublicRef", "@opencode/schema/location", Location.PublicRef),
   typeReference("Location.PublicInfo", "@opencode/schema/location", Location.PublicInfo),
   ...namespaceTypes("Mcp", "@opencode/schema/mcp", Mcp),
+  ...namespaceTypes("Marketplace", "@opencode/schema/marketplace", Marketplace),
   ...namespaceTypes("Model", "@opencode/schema/model", Model),
   ...namespaceTypes("Money", "@opencode/schema/money", Money),
   ...namespaceTypes("Permission", "@opencode/schema/permission", Permission),

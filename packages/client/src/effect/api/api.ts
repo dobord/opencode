@@ -46,6 +46,7 @@ import type { Vcs } from "@opencode/schema/vcs"
 import type { WebSearch } from "@opencode/schema/websearch"
 import type { UsageLimits } from "@opencode/schema/usage-limits"
 import type { Config } from "@opencode/schema/config"
+import type { Marketplace } from "@opencode/schema/marketplace"
 
 export type ServerInfoOutput = {
   readonly version: string
@@ -2845,6 +2846,145 @@ export interface ExperimentalConfigApi<E = never> {
   readonly update: ExperimentalConfigUpdateOperation<E>
 }
 
+export type ExperimentalMarketplaceGetInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+export type ExperimentalMarketplaceGetOutput = Marketplace.View
+export type ExperimentalMarketplaceGetOperation<E = never> = (
+  input?: ExperimentalMarketplaceGetInput,
+) => Effect.Effect<ExperimentalMarketplaceGetOutput, E>
+
+export type ExperimentalMarketplaceRefreshInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+export type ExperimentalMarketplaceRefreshOutput = Marketplace.View
+export type ExperimentalMarketplaceRefreshOperation<E = never> = (
+  input?: ExperimentalMarketplaceRefreshInput,
+) => Effect.Effect<ExperimentalMarketplaceRefreshOutput, E>
+
+export type ExperimentalMarketplacePlanInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly key: string
+}
+export type ExperimentalMarketplacePlanOutput = Marketplace.PlanResult
+export type ExperimentalMarketplacePlanOperation<E = never> = (
+  input: ExperimentalMarketplacePlanInput,
+) => Effect.Effect<ExperimentalMarketplacePlanOutput, E>
+
+export type ExperimentalMarketplaceInstallInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly key: string
+  readonly expected_revision: number
+  readonly force?: boolean | undefined
+  readonly accept_untrusted?: boolean | undefined
+}
+export type ExperimentalMarketplaceInstallOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceInstallOperation<E = never> = (
+  input: ExperimentalMarketplaceInstallInput,
+) => Effect.Effect<ExperimentalMarketplaceInstallOutput, E>
+
+export type ExperimentalMarketplaceUpdateAllInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly force?: boolean | undefined
+  readonly accept_untrusted?: boolean | undefined
+}
+export type ExperimentalMarketplaceUpdateAllOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceUpdateAllOperation<E = never> = (
+  input: ExperimentalMarketplaceUpdateAllInput,
+) => Effect.Effect<ExperimentalMarketplaceUpdateAllOutput, E>
+
+export type ExperimentalMarketplaceUninstallInput = {
+  readonly key: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+}
+export type ExperimentalMarketplaceUninstallOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceUninstallOperation<E = never> = (
+  input: ExperimentalMarketplaceUninstallInput,
+) => Effect.Effect<ExperimentalMarketplaceUninstallOutput, E>
+
+export type ExperimentalMarketplaceToggleInput = {
+  readonly key: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly component: "package" | "skill" | "mcp"
+  readonly id?: string | undefined
+  readonly enabled: boolean
+}
+export type ExperimentalMarketplaceToggleOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceToggleOperation<E = never> = (
+  input: ExperimentalMarketplaceToggleInput,
+) => Effect.Effect<ExperimentalMarketplaceToggleOutput, E>
+
+export type ExperimentalMarketplaceSourceAddInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly url: string
+  readonly name?: string | undefined
+  readonly trust?: "community" | "private" | undefined
+  readonly headers?: { readonly [x: string]: string } | undefined
+}
+export type ExperimentalMarketplaceSourceAddOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceSourceAddOperation<E = never> = (
+  input: ExperimentalMarketplaceSourceAddInput,
+) => Effect.Effect<ExperimentalMarketplaceSourceAddOutput, E>
+
+export type ExperimentalMarketplaceSourceToggleInput = {
+  readonly id: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly enabled: boolean
+}
+export type ExperimentalMarketplaceSourceToggleOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceSourceToggleOperation<E = never> = (
+  input: ExperimentalMarketplaceSourceToggleInput,
+) => Effect.Effect<ExperimentalMarketplaceSourceToggleOutput, E>
+
+export type ExperimentalMarketplaceSourceRemoveInput = {
+  readonly id: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+}
+export type ExperimentalMarketplaceSourceRemoveOutput = Marketplace.MutationResult
+export type ExperimentalMarketplaceSourceRemoveOperation<E = never> = (
+  input: ExperimentalMarketplaceSourceRemoveInput,
+) => Effect.Effect<ExperimentalMarketplaceSourceRemoveOutput, E>
+
+export type ExperimentalMarketplaceProfileExportInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+}
+export type ExperimentalMarketplaceProfileExportOutput = Marketplace.Profile
+export type ExperimentalMarketplaceProfileExportOperation<E = never> = (
+  input?: ExperimentalMarketplaceProfileExportInput,
+) => Effect.Effect<ExperimentalMarketplaceProfileExportOutput, E>
+
+export type ExperimentalMarketplaceCachePruneInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly max_age_days?: number | undefined
+}
+export type ExperimentalMarketplaceCachePruneOutput = Marketplace.CacheSummary
+export type ExperimentalMarketplaceCachePruneOperation<E = never> = (
+  input?: ExperimentalMarketplaceCachePruneInput,
+) => Effect.Effect<ExperimentalMarketplaceCachePruneOutput, E>
+
+export interface ExperimentalMarketplaceApi<E = never> {
+  readonly get: ExperimentalMarketplaceGetOperation<E>
+  readonly refresh: ExperimentalMarketplaceRefreshOperation<E>
+  readonly plan: ExperimentalMarketplacePlanOperation<E>
+  readonly install: ExperimentalMarketplaceInstallOperation<E>
+  readonly updateAll: ExperimentalMarketplaceUpdateAllOperation<E>
+  readonly uninstall: ExperimentalMarketplaceUninstallOperation<E>
+  readonly toggle: ExperimentalMarketplaceToggleOperation<E>
+  readonly sourceAdd: ExperimentalMarketplaceSourceAddOperation<E>
+  readonly sourceToggle: ExperimentalMarketplaceSourceToggleOperation<E>
+  readonly sourceRemove: ExperimentalMarketplaceSourceRemoveOperation<E>
+  readonly profileExport: ExperimentalMarketplaceProfileExportOperation<E>
+  readonly cachePrune: ExperimentalMarketplaceCachePruneOperation<E>
+}
+
 /** @deprecated Use `ExperimentalSessionStatsInput`. Removed in the next minor. */
 export type SessionStatsInput = ExperimentalSessionStatsInput
 
@@ -3092,6 +3232,7 @@ export interface AppApi<E = never> {
     readonly migration: ExperimentalMigrationApi<E>
     readonly usage: ExperimentalUsageApi<E>
     readonly config: ExperimentalConfigApi<E>
+    readonly marketplace: ExperimentalMarketplaceApi<E>
   }
   readonly message: MessageApi<E>
   readonly model: ModelApi<E>

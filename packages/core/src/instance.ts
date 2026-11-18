@@ -57,6 +57,7 @@ import { ReadToolFileSystem } from "./tool/read-filesystem.js"
 import { Tool } from "./tool.js"
 import { ToolOutput } from "./tool-output.js"
 import { Vcs } from "./vcs.js"
+import { MarketplaceService } from "./marketplace/service.js"
 
 export * as Instance from "./instance.js"
 export { Service, node, type Interface } from "./instance/service.js"
@@ -67,6 +68,7 @@ const nodes = [
   LocationLifecycle.node,
   Environment.node,
   Config.node,
+  MarketplaceService.node,
   Flag.node,
   Agent.node,
   Artifact.node,

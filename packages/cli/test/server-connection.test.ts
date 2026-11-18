@@ -129,6 +129,9 @@ test("global --server and --standalone flags parse in any position for server-co
 
   const url = "http://127.0.0.1:43210"
   const serverCases: ReadonlyArray<readonly [ReadonlyArray<string>, string]> = [
+    [["--server", url, "marketplace", "list"], "opencode marketplace"],
+    [["marketplace", "--server", url, "source-add", "./catalog"], "opencode marketplace"],
+    [["marketplace", "list", "--server", url], "opencode marketplace"],
     [["--server", url, "session", "list"], "opencode session list"],
     [["session", "--server", url, "list"], "opencode session list"],
     [["session", "list", "--server", url], "opencode session list"],

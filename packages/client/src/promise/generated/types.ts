@@ -386,6 +386,106 @@ export type ConfigModelReasoning =
 
 export type ConfigShellOption = { path: string; name: string; acceptable: boolean }
 
+export type MarketplaceSource = {
+  id: string
+  name: string
+  url: string
+  reference?: string
+  enabled?: boolean
+  trust?: "official" | "verified" | "community" | "private"
+  headers?: { [x: string]: string }
+}
+
+export type MarketplaceInstalled = {
+  source: string
+  source_url?: string
+  source_trust?: "official" | "verified" | "community" | "private"
+  catalog: string
+  catalog_name?: string
+  item: string
+  name: string
+  kind: "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
+  version: string
+  publisher?: string
+  fingerprint: string
+  installed_at: string
+  updated_at: string
+  snapshot: JsonValue
+  plan: JsonValue
+  materialized_plan: JsonValue
+  active_plan: JsonValue
+  receipt: JsonValue
+  enabled?: boolean
+  disabled_skills?: Array<string>
+  disabled_mcp?: Array<string>
+  catalog_digest?: string
+  manifest_digest?: string
+  materialized_digest?: string
+  artifact_digests?: Array<string>
+}
+
+export type MarketplaceItem = {
+  id: string
+  name: string
+  description: string
+  kind: "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
+  version: string
+  publisher?: { name: string; url?: string }
+  homepage?: string
+  repository?: string
+  license?: string
+  tags?: Array<string>
+  featured?: boolean
+  icon?: { "src-light": string; "src-dark"?: string }
+  brand_color?: string
+  permissions?: Array<string>
+  setup?: Array<string>
+  requires_restart?: boolean
+  install: {
+    plugins?: Array<string | [string, { [x: string]: JsonValue }]>
+    skills?: {
+      paths?: Array<string>
+      urls?: Array<string>
+      items?: Array<{ id: string; name: string; description?: string; path?: string; url?: string; enabled?: boolean }>
+    }
+    agents?: { [x: string]: { [x: string]: JsonValue } }
+    commands?: { [x: string]: { [x: string]: JsonValue } }
+    mcp?: { [x: string]: { [x: string]: JsonValue } }
+    instructions?: Array<string>
+  }
+}
+
+export type MarketplaceCacheSummary = {
+  root: string
+  objects: number
+  total_bytes: number
+  fetch_entries: number
+  materializations: number
+}
+
+export type MarketplaceConflict = { path: string; current: any; incoming: any }
+
+export type MarketplaceConflict1 = { path: string; current: JsonValue; incoming: JsonValue }
+
+export type MarketplaceProfile = {
+  schema: "opencode.marketplace.profile/v1"
+  name: string
+  description?: string
+  generated_at: string
+  sources: Array<{ id: string; name: string; url: string; trust?: "official" | "verified" | "community" | "private" }>
+  packages: Array<{
+    key: string
+    source: string
+    catalog: string
+    item: string
+    name: string
+    kind: string
+    version: string
+    enabled: boolean
+    components: { skills: { [x: string]: boolean }; mcp: { [x: string]: boolean } }
+  }>
+}
+
 export type LocationPublicRef = { directory: AbsolutePath }
 
 export type FileSystemWrite = { path: AbsolutePath }
@@ -1019,6 +1119,34 @@ export type ConfigModelCapabilities = {
   temperature?: boolean
   reasoning?: ConfigModelReasoning
 }
+
+export type MarketplaceLoadError = { source: MarketplaceSource; message: string }
+
+export type MarketplaceState = {
+  revision?: number
+  sources?: Array<MarketplaceSource>
+  installed?: { [x: string]: MarketplaceInstalled }
+}
+
+export type MarketplaceCatalog = {
+  schema: "opencode.marketplace/v1"
+  id: string
+  name: string
+  description?: string
+  items: Array<MarketplaceItem>
+}
+
+export type MarketplacePlanResult =
+  | {
+      ok: true
+      key: string
+      action: "install" | "update"
+      trust_warning: boolean
+      conflicts: Array<MarketplaceConflict>
+      permissions: Array<string>
+      summary: string
+    }
+  | { ok: false; reason: "not_found" | "materialization"; message: string }
 
 export type SessionMessageLocationSwitched = {
   id: SessionMessageID
@@ -2305,6 +2433,17 @@ export type ArtifactContent = { info: ArtifactInfo; files: { [x: string]: string
 
 export type JobInfo = JobShell | JobSubagent | JobImage | JobCodeMode
 
+export type MarketplaceListing = {
+  key: string
+  source: MarketplaceSource
+  catalog: MarketplaceCatalog
+  item: MarketplaceItem
+  status?: "available" | "installed" | "update"
+  orphaned?: boolean
+  catalog_url?: string
+  catalog_digest?: string
+}
+
 export type SessionInboxMove = {
   id: SessionMessageID
   sessionID: SessionID
@@ -2728,6 +2867,13 @@ export type CredentialEntry = {
 
 export type FormFields1 = [FormField1, ...Array<FormField1>]
 
+export type MarketplaceView = {
+  state: MarketplaceState
+  listings: Array<MarketplaceListing>
+  errors: Array<MarketplaceLoadError>
+  cache: MarketplaceCacheSummary
+}
+
 export type AgentInfo = {
   id: AgentID
   name: string
@@ -2824,6 +2970,16 @@ export type GenerateVideoGetResponse = { data: GenerateVideoJob }
 export type GenerateDecisionsResponse = { data: GenerateDecisionResult }
 
 export type FormInfo1 = { id: FormID; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields1 }
+
+export type MarketplaceMutationResult =
+  | { ok: true; changed: boolean; view: MarketplaceView; connect_mcp: Array<string>; preserved: Array<string> }
+  | {
+      ok: false
+      reason: "conflict" | "revision" | "trust" | "not_found" | "materialization"
+      message: string
+      revision?: number
+      conflicts?: Array<MarketplaceConflict1>
+    }
 
 export type SessionMessageInfo =
   | SessionMessageAgentSelected
@@ -4946,6 +5102,106 @@ export type ConfigShellsOutput = Array<ConfigShellOption>
 export type ExperimentalConfigUpdateInput = { readonly shell: string | null }
 
 export type ExperimentalConfigUpdateOutput = void
+
+export type ExperimentalMarketplaceGetInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+
+export type ExperimentalMarketplaceGetOutput = MarketplaceView
+
+export type ExperimentalMarketplaceRefreshInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+
+export type ExperimentalMarketplaceRefreshOutput = MarketplaceView
+
+export type ExperimentalMarketplacePlanInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly key: string
+}
+
+export type ExperimentalMarketplacePlanOutput = MarketplacePlanResult
+
+export type ExperimentalMarketplaceInstallInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly key: string
+  readonly expected_revision: number
+  readonly force?: boolean | undefined
+  readonly accept_untrusted?: boolean | undefined
+}
+
+export type ExperimentalMarketplaceInstallOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceUpdateAllInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly force?: boolean | undefined
+  readonly accept_untrusted?: boolean | undefined
+}
+
+export type ExperimentalMarketplaceUpdateAllOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceUninstallInput = {
+  readonly key: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+}
+
+export type ExperimentalMarketplaceUninstallOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceToggleInput = {
+  readonly key: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly component: "package" | "skill" | "mcp"
+  readonly id?: string | undefined
+  readonly enabled: boolean
+}
+
+export type ExperimentalMarketplaceToggleOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceSourceAddInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly url: string
+  readonly name?: string | undefined
+  readonly trust?: "community" | "private" | undefined
+  readonly headers?: { readonly [x: string]: string } | undefined
+}
+
+export type ExperimentalMarketplaceSourceAddOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceSourceToggleInput = {
+  readonly id: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+  readonly enabled: boolean
+}
+
+export type ExperimentalMarketplaceSourceToggleOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceSourceRemoveInput = {
+  readonly id: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly expected_revision: number
+}
+
+export type ExperimentalMarketplaceSourceRemoveOutput = MarketplaceMutationResult
+
+export type ExperimentalMarketplaceProfileExportInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+}
+
+export type ExperimentalMarketplaceProfileExportOutput = MarketplaceProfile
+
+export type ExperimentalMarketplaceCachePruneInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly max_age_days?: number | undefined
+}
+
+export type ExperimentalMarketplaceCachePruneOutput = MarketplaceCacheSummary
 
 /** @deprecated Use `ExperimentalSessionStatsInput`. Removed in the next minor. */
 export type SessionStatsInput = ExperimentalSessionStatsInput

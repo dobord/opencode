@@ -26,9 +26,11 @@ a.out
 target
 .scripts
 .cache
+.astro/
 .direnv/
 
 # Local dev files
+.marketplace-smoke/
 opencode-dev
 RELEASE_REVIEW.md
 logs/

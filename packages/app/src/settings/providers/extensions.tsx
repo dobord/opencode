@@ -33,6 +33,7 @@ import { SettingsList } from "@/settings/list"
 import { createExtensionLoad, ExtensionLoadFailed } from "@/settings/extension-load"
 import type { SettingsView } from "@/settings/surface"
 import { ConsoleName, ConsoleReplaced, createConsoleSources } from "./console-link"
+import { DialogMarketplace } from "../marketplace/panel"
 import {
   createPluginUpdateState,
   pluginUpdateChecking,
@@ -195,7 +196,10 @@ export const SettingsExtensions: Component<{
             <h2 class="settings-tab-title">{language.t("settings.tab.extensions")}</h2>
             <span class="text-11-regular text-v2-text-text-muted">{language.t("settings.extensions.description")}</span>
           </div>
-          <div class="settings-tab-header-actions">{props.headerAction}</div>
+          <div class="settings-tab-header-actions">
+            <Button variant="ghost-muted" onClick={() => dialog.show(() => <DialogMarketplace />)}>{language.t("marketplace.title")}</Button>
+            {props.headerAction}
+          </div>
         </div>
       </div>
 

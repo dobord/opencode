@@ -24,6 +24,8 @@ import { Connection } from "@opencode/schema/connection"
 import { WellKnown } from "./wellknown.js"
 import { AppProcess } from "@opencode/util/process"
 import { ChildProcess } from "effect/process"
+import { MarketplaceRegistry } from "./marketplace/registry.js"
+import { composeMarketplaceConfig } from "./marketplace/overlay.js"
 
 export function latest<K extends keyof Info>(entries: readonly Entry[], key: K): Info[K] | undefined {
   return entries.findLast((entry): entry is Document => entry.type === "document" && entry.info[key] !== undefined)
@@ -33,6 +35,8 @@ export function latest<K extends keyof Info>(entries: readonly Entry[], key: K):
 export interface Interface {
   /** Returns location config documents and discovery sources from lowest to highest priority. */
   readonly entries: () => Effect.Effect<Entry[]>
+  /** Reload externally persisted contributions, including Marketplace installations. */
+  readonly refresh?: () => Effect.Effect<void>
   /** Compatibility roots consumed by internal compatibility plugins. */
   readonly compatibility?: () => Effect.Effect<{
     readonly claude: readonly AbsolutePath[]
@@ -71,6 +75,9 @@ export const Options = Schema.Struct({
 export type Options = typeof Options.Type
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Config") {}
+
+/** Identifies the derived contribution so conflict checks can compare against user-owned documents only. */
+export class MarketplaceDocument extends Document {}
 
 export interface TestInterface extends Interface {
   /** Replaces the entries returned by subsequent entries() calls. */
@@ -128,6 +135,7 @@ export const layer = (options?: Options) =>
       const globalService = yield* Global.Service
       const wellknown = yield* WellKnown.Service
       const processes = yield* AppProcess.Service
+      const marketplace = yield* MarketplaceRegistry.Service
       const integrations = new Map<string, ConfigIntegration.Document>()
       // Integrations set their documents from outside this layer, so their reloads run with its services.
       const context = yield* Effect.context<FSUtil.Service | Global.Service | Location.Service>()
@@ -364,6 +372,11 @@ export const layer = (options?: Options) =>
             ),
           ),
         )
+        const overlay = composeMarketplaceConfig({}, yield* marketplace.read())
+        delete overlay.marketplace
+        const contribution = Object.keys(overlay).length
+          ? yield* parseInfo(JSON.stringify(overlay), "marketplace")
+          : undefined
         return [
           ...managedPolicies,
           ...integrated,
@@ -373,6 +386,7 @@ export const layer = (options?: Options) =>
           ...direct,
           ...projectSupplementary,
           ...content,
+          ...(contribution ? [new MarketplaceDocument({ type: "document", info: contribution })] : []),
           ...managedSettings,
         ]
       })
@@ -419,6 +433,10 @@ export const layer = (options?: Options) =>
       )
 
       // Subscribe eagerly so synchronous watch readiness isn't dropped.
+      yield* marketplace.changes().pipe(
+        Stream.runForEach(() => reload()),
+        Effect.forkScoped({ startImmediately: true }),
+      )
       const pendingReloads = yield* PubSub.subscribe(reloads)
       yield* Stream.fromSubscription(pendingReloads).pipe(
         Stream.debounce("100 millis"),
@@ -500,6 +518,7 @@ export const layer = (options?: Options) =>
           }),
         changes: () => Stream.fromPubSub(updates),
         update,
+        refresh: () => reload().pipe(Effect.provide(context)),
         integration: Effect.fn("Config.integration")(function* (integrationID, document) {
           if (isDeepStrictEqual(integrations.get(integrationID), document)) return
           integrations.delete(integrationID)
@@ -526,6 +545,7 @@ export function configured(options?: Options) {
       Credential.node,
       WellKnown.node,
       AppProcess.node,
+      MarketplaceRegistry.node,
     ],
   })
 }
