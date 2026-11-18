@@ -10,6 +10,10 @@ import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Database } from "../database/database.js"
 import { EffectFlock } from "@opencode/util/effect-flock"
 import { Global } from "@opencode/util/global"
+import { foreignSkillRepositories } from "./foreign.js"
+import { MarketplaceGit } from "./git.js"
+import { AppProcess } from "@opencode/util/process"
+import { FSUtil } from "@opencode/util/fs-util"
 import type {
   MarketplaceFetch,
   MarketplaceInstallPlan,
@@ -238,6 +242,8 @@ const layer = Layer.effect(
     const { db } = yield* Database.Service
     const flock = yield* EffectFlock.Service
     const global = yield* Global.Service
+    const proc = yield* AppProcess.Service
+    const fs = yield* FSUtil.Service
     const context = yield* Effect.context<Database.Service | EffectFlock.Service | Global.Service>()
     const root = path.join(global.cache, "marketplace")
     const objects = path.join(root, "objects", "sha256")
@@ -699,6 +705,15 @@ const layer = Layer.effect(
       const itemRoots = new Map<string, string>()
       const pluginRelatives = new Map<number, string>()
       const mcpCommandRelatives = new Map<string, Map<number, string>>()
+      const downloaded = new Map<string, Uint8Array>()
+      for (const repository of foreignSkillRepositories(plan)) {
+        const files = yield* MarketplaceGit.readFiles({ ...repository, directory: root }).pipe(
+          Effect.provideService(AppProcess.Service, proc),
+          Effect.provideService(FSUtil.Service, fs),
+          Effect.mapError((error) => cacheError("fetch skill repository", error)),
+        )
+        files.forEach((bytes, url) => downloaded.set(url, bytes))
+      }
 
       for (const [index, plugin] of (plan.plugins ?? []).entries()) {
         const spec = Array.isArray(plugin) ? plugin[0] : plugin
@@ -802,6 +817,20 @@ const layer = Layer.effect(
       }
 
       for (const item of plan.skills?.items ?? []) {
+        if (item.files) {
+          const root = path.posix.join("skills", `item-${safeSegment(item.id)}`, safeSegment(item.name))
+          for (const [file, url] of Object.entries(item.files)) {
+            const relative = path.posix.join(root, safeRelative(file))
+            const bytes = downloaded.get(url)
+            const artifact = bytes
+              ? { ...(yield* put(bytes, { kind: "skill-file", sourceUrl: url })), bytes }
+              : yield* fetchArtifact({ url, headers: sameOriginHeaders(source, url), kind: "skill-file", source })
+            digests.add(artifact.digest)
+            entries.set(relative, { relative, bytes: artifact.bytes, digest: artifact.digest })
+          }
+          itemRoots.set(item.id, root)
+          continue
+        }
         if (!item.url) continue
         const indexed = yield* indexedSkill({
           url: item.url,
@@ -1038,5 +1067,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [Database.node, EffectFlock.node, Global.node],
+  deps: [Database.node, EffectFlock.node, Global.node, AppProcess.node, FSUtil.node],
 })

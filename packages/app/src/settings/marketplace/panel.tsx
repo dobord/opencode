@@ -53,11 +53,11 @@ export function MarketplacePanel() {
           .includes(form.query.toLowerCase()),
     )
 
-  async function run(task: (signal: AbortSignal) => Promise<View>) {
+  async function run(task: (signal: AbortSignal) => Promise<View>, timeout = 60_000) {
     if (disabled()) return
     dispatch({ type: "start" })
     const attempt = state().attempt
-    const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(60_000)])
+    const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(timeout)])
     try {
       dispatch({ type: "loaded", attempt, view: await task(signal) })
     } catch (error) {
@@ -93,19 +93,23 @@ export function MarketplacePanel() {
   }
 
   const install = (listing: Listing) =>
-    run((signal) =>
-      mutation(
-        client.install(
-          {
-            location: location(),
-            key: listing.key,
-            expected_revision: revision(),
-            force: true,
-            accept_untrusted: true,
-          },
-          { signal },
+    // A cold repository download can take several minutes; do not abort the
+    // UI request while the server is still downloading it successfully.
+    run(
+      (signal) =>
+        mutation(
+          client.install(
+            {
+              location: location(),
+              key: listing.key,
+              expected_revision: revision(),
+              force: true,
+              accept_untrusted: true,
+            },
+            { signal },
+          ),
         ),
-      ),
+      360_000,
     )
 
   return (
@@ -240,10 +244,12 @@ export function MarketplacePanel() {
             <For each={view()?.state.sources}>
               {(source) => (
                 <div class="flex items-center gap-2">
-                  <span class="flex-1">
-                    {source.name}
+                  <span class="flex-1 min-w-0">
+                    <bdi>{source.name}</bdi>
                     <br />
-                    <code>{source.url}</code>
+                    <bdi dir="ltr">
+                      <code class="break-all">{source.reference ?? source.url}</code>
+                    </bdi>
                   </span>
                   <Switch
                     checked={source.enabled !== false}

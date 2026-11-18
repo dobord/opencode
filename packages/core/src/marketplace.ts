@@ -1,4 +1,5 @@
 import semver from "semver"
+import { parseForeignMarketplaceCatalog, type ForeignMarketplacePlugin } from "./marketplace/foreign.js"
 
 export type MarketplaceKind = "plugin" | "skill" | "agent" | "command" | "mcp" | "bundle"
 export type MarketplaceTrust = "official" | "verified" | "community" | "private"
@@ -36,9 +37,11 @@ export type MarketplaceSkill = {
   path?: string
   url?: string
   enabled?: boolean
+  files?: Record<string, string>
 }
 
 export type MarketplaceInstallPlan = {
+  foreign?: ForeignMarketplacePlugin
   plugins?: MarketplacePluginSpec[]
   skills?: {
     paths?: string[]
@@ -270,43 +273,22 @@ type MarketplaceInstalledEntry = {
   installed: MarketplaceInstalled
 }
 
-export const OFFICIAL_MARKETPLACE_SOURCE: MarketplaceSource = {
-  id: "opencode",
-  name: "OpenCode",
-  url: "builtin://opencode",
-  enabled: true,
-  trust: "official",
-}
-
-const OFFICIAL_MARKETPLACE_CATALOG: MarketplaceCatalog = {
-  schema: "opencode.marketplace/v1",
-  id: "opencode",
-  name: "OpenCode Marketplace",
-  description: "The built-in OpenCode catalog. Additional catalogs can be added from the Sources tab.",
-  publisher: {
-    name: "OpenCode",
-    url: "https://opencode.ai",
-    verified: true,
-  },
-  items: [],
-}
-
 const KINDS = new Set<MarketplaceKind>(["plugin", "skill", "agent", "command", "mcp", "bundle"])
 const MAX_CATALOG_BYTES = 2 * 1024 * 1024
 const MAX_CATALOG_ITEMS = 2_000
 const MAX_IDENTIFIER_LENGTH = 128
 
 export function marketplaceSources(config: MarketplaceHostConfig) {
-  const sources = new Map<string, MarketplaceSource>([[OFFICIAL_MARKETPLACE_SOURCE.id, OFFICIAL_MARKETPLACE_SOURCE]])
+  const sources = new Map<string, MarketplaceSource>()
   for (const source of config.marketplace?.sources ?? []) {
-    if (source.id === OFFICIAL_MARKETPLACE_SOURCE.id) {
-      sources.set(OFFICIAL_MARKETPLACE_SOURCE.id, {
-        ...OFFICIAL_MARKETPLACE_SOURCE,
-        enabled: source.enabled !== false,
-      })
-      continue
-    }
-    sources.set(source.id, { ...source, trust: configuredTrust(source.trust) })
+    // Ignore the retired built-in source in old profiles and registries.
+    if (source.url === "builtin://opencode") continue
+    sources.set(source.id, {
+      ...source,
+      name:
+        source.name === sourceHost(source.url) ? sourceName(source.reference ?? source.url, source.url) : source.name,
+      trust: configuredTrust(source.trust),
+    })
   }
   return Array.from(sources.values())
 }
@@ -318,10 +300,9 @@ export function createMarketplaceSource(input: {
   headers?: Record<string, string>
 }) {
   const url = normalizeMarketplaceURL(input.url)
-  const host = sourceHost(url)
   return {
     id: `source-${hash(url)}`,
-    name: input.name?.trim() || host || "Marketplace catalog",
+    name: input.name?.trim() || sourceName(input.url.trim(), url),
     url,
     reference: input.url.trim(),
     enabled: true,
@@ -332,11 +313,8 @@ export function createMarketplaceSource(input: {
 
 export function upsertMarketplaceSource(config: MarketplaceHostConfig, source: MarketplaceSource) {
   const next = clone(config)
-  const sources = next.marketplace?.sources ?? []
-  const safe =
-    source.id === OFFICIAL_MARKETPLACE_SOURCE.id
-      ? { ...OFFICIAL_MARKETPLACE_SOURCE, enabled: source.enabled !== false }
-      : { ...source, trust: configuredTrust(source.trust) }
+  const sources = marketplaceSources(next)
+  const safe = { ...source, trust: configuredTrust(source.trust) }
   next.marketplace = {
     ...next.marketplace,
     sources: [...sources.filter((item) => item.id !== safe.id), safe],
@@ -351,11 +329,10 @@ export function toggleMarketplaceSource(config: MarketplaceHostConfig, id: strin
 }
 
 export function removeMarketplaceSource(config: MarketplaceHostConfig, id: string) {
-  if (id === OFFICIAL_MARKETPLACE_SOURCE.id) return clone(config)
   const next = clone(config)
   next.marketplace = {
     ...next.marketplace,
-    sources: (next.marketplace?.sources ?? []).filter((source) => source.id !== id),
+    sources: marketplaceSources(next).filter((source) => source.id !== id),
   }
   return next
 }
@@ -371,14 +348,7 @@ export async function loadMarketplace(input: {
       .filter((source) => source.enabled !== false)
       .map(async (source) => {
         try {
-          const loaded =
-            source.url === OFFICIAL_MARKETPLACE_SOURCE.url
-              ? {
-                  catalog: OFFICIAL_MARKETPLACE_CATALOG,
-                  url: OFFICIAL_MARKETPLACE_SOURCE.url,
-                  digest: undefined,
-                }
-              : await fetchMarketplaceCatalog(fetcher, source, input.timeout ?? 10_000)
+          const loaded = await fetchMarketplaceCatalog(fetcher, source, input.timeout ?? 10_000)
           return { ok: true as const, source, ...loaded }
         } catch (error) {
           return { ok: false as const, source, error: error instanceof Error ? error.message : String(error) }
@@ -458,7 +428,9 @@ async function fetchMarketplaceCatalog(fetcher: MarketplaceFetch, source: Market
       signal: AbortSignal.timeout(timeout),
     })
     const digest = response.headers.get("x-opencode-artifact-digest") ?? undefined
-    const catalog = resolveCatalogAssets(parseMarketplaceCatalog(await readCatalogResponse(response)), url)
+    const value = await readCatalogResponse(response)
+    const foreign = parseForeignMarketplaceCatalog(value, url)
+    const catalog = foreign ?? resolveCatalogAssets(parseMarketplaceCatalog(value), url)
     return { catalog, url, digest }
   }
   const urls = marketplaceCatalogURLs(source.url)
@@ -474,7 +446,17 @@ async function fetchMarketplaceCatalog(fetcher: MarketplaceFetch, source: Market
     }
     throw lastError
   }
-  return Promise.any(urls.map(load))
+  // Prefer native catalogs deterministically, even when a repository also
+  // publishes catalogs for other hosts. Do not race their response times.
+  const errors: string[] = []
+  for (const url of urls) {
+    try {
+      return await load(url)
+    } catch (error) {
+      errors.push(`${url}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  throw new Error(errors.join("\n"))
 }
 
 export function parseMarketplaceCatalog(value: unknown): MarketplaceCatalog {
@@ -889,7 +871,6 @@ export function marketplacePlanSummary(plan: MarketplaceInstallPlan) {
 export function normalizeMarketplaceURL(value: string) {
   const url = value.trim()
   if (!url) throw new Error("Marketplace catalog URL is required")
-  if (url.startsWith("builtin://")) return url
   if (url.startsWith("github:")) {
     const repo = url.slice("github:".length).replace(/^\/+/, "")
     const [owner, name, ...parts] = repo.split("/")
@@ -899,7 +880,7 @@ export function normalizeMarketplaceURL(value: string) {
   const parsed = new URL(url)
   if (parsed.username || parsed.password) throw new Error("Marketplace source URLs cannot contain credentials")
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:" && parsed.protocol !== "file:") {
-    throw new Error("Marketplace sources must use HTTPS, loopback HTTP, file:, github:, or builtin:")
+    throw new Error("Marketplace sources must use HTTPS, loopback HTTP, file:, or github:")
   }
   if (parsed.protocol === "http:" && !isLoopback(parsed.hostname)) {
     throw new Error("Marketplace sources must use HTTPS; HTTP is only allowed for loopback development servers")
@@ -929,6 +910,17 @@ function marketplaceCatalogURLs(value: string) {
   const url = new URL(source)
   if (url.protocol === "file:" && url.pathname.endsWith("/")) {
     return [new URL(".opencode/marketplace.json", url).href, new URL("marketplace.json", url).href]
+  }
+  // This is also the persisted normalization of a bare GitHub repository in
+  // older registries. Keep its identity and discover the foreign catalogs too.
+  if (url.hostname === "raw.githubusercontent.com" && url.pathname.endsWith("/.opencode/marketplace.json")) {
+    const root = source.slice(0, -".opencode/marketplace.json".length)
+    return [
+      source,
+      ...[".claude-plugin/marketplace.json", ".github/plugin/marketplace.json", ".agents/plugins/marketplace.json"].map(
+        (file) => root + file,
+      ),
+    ]
   }
   if (!source.endsWith(".git")) return [source]
   const repository = `${url.origin}${url.pathname.slice(0, -".git".length)}`
@@ -1336,6 +1328,9 @@ function marketplaceKey(source: string, catalog: string, item: string) {
 }
 
 export function marketplaceFingerprint(item: MarketplaceCatalogItem) {
+  // Foreign components are resolved lazily. Comparing a resolved installed
+  // plan with an unresolved catalog descriptor must not manufacture an update.
+  if (item.install.foreign) return hash(stable({ ...item, install: { foreign: item.install.foreign } }))
   return hash(stable(item))
 }
 
@@ -1561,6 +1556,21 @@ function sourceHost(value: string) {
   } catch {
     return ""
   }
+}
+
+function sourceName(reference: string, normalized: string) {
+  const url = new URL(normalized)
+  if (url.hostname === "github.com" || url.hostname === "raw.githubusercontent.com") {
+    const repository = url.pathname
+      .split("/")
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("/")
+      .replace(/\.git$/, "")
+    if (repository) return repository
+  }
+  if (url.protocol === "file:") return sourceHost(normalized) || reference
+  return reference
 }
 
 function hash(value: string) {

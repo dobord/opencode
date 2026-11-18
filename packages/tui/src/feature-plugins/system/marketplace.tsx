@@ -61,7 +61,7 @@ async function open(context: Plugin.Context) {
             title: "Catalog sources",
             options: (view.state.sources ?? []).map((source) => ({
               title: source.name,
-              description: source.url,
+              description: source.reference ?? source.url,
               value: source.id,
               footer: source.enabled === false ? "disabled" : "enabled",
             })),

@@ -442,11 +442,20 @@ export type MarketplaceItem = {
   setup?: Array<string>
   requires_restart?: boolean
   install: {
+    foreign?: { format: "claude" | "copilot" | "codex"; catalog_url: string; entry: { [x: string]: JsonValue } }
     plugins?: Array<string | [string, { [x: string]: JsonValue }]>
     skills?: {
       paths?: Array<string>
       urls?: Array<string>
-      items?: Array<{ id: string; name: string; description?: string; path?: string; url?: string; enabled?: boolean }>
+      items?: Array<{
+        id: string
+        name: string
+        description?: string
+        path?: string
+        url?: string
+        enabled?: boolean
+        files?: { [x: string]: string }
+      }>
     }
     agents?: { [x: string]: { [x: string]: JsonValue } }
     commands?: { [x: string]: { [x: string]: JsonValue } }

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  OFFICIAL_MARKETPLACE_SOURCE,
   createMarketplaceSource,
   installMarketplaceItem,
   loadMarketplace,
@@ -700,18 +699,49 @@ describe("marketplace installation", () => {
 })
 
 describe("marketplace sources", () => {
-  test("adds, disables, and removes catalogs without hiding the built-in source", () => {
+  test("starts empty and adds, disables, and removes only configured catalogs", () => {
+    expect(marketplaceSources({})).toEqual([])
     const source = createMarketplaceSource({ url: "github:example/catalog", trust: "community" })
     const added = upsertMarketplaceSource({}, source)
-    expect(marketplaceSources(added).map((item) => item.id)).toEqual(["opencode", source.id])
+    expect(marketplaceSources(added).map((item) => item.id)).toEqual([source.id])
     expect(source.url).toBe("https://raw.githubusercontent.com/example/catalog/HEAD/.opencode/marketplace.json")
 
     const disabled = toggleMarketplaceSource(added, source.id, false)
     expect(marketplaceSources(disabled).find((item) => item.id === source.id)?.enabled).toBe(false)
 
     const removed = removeMarketplaceSource(disabled, source.id)
-    expect(marketplaceSources(removed).map((item) => item.id)).toEqual(["opencode"])
-    expect(removeMarketplaceSource(removed, OFFICIAL_MARKETPLACE_SOURCE.id)).toEqual(removed)
+    expect(marketplaceSources(removed)).toEqual([])
+  })
+
+  test("ignores a persisted retired catalog without fetching it", async () => {
+    const config = { marketplace: { sources: [{ id: "opencode", name: "OpenCode", url: "builtin://opencode" }] } }
+    const result = await loadMarketplace({
+      config,
+      fetch: async () => {
+        throw new Error("No source should be fetched")
+      },
+    })
+    expect(result).toEqual({ listings: [], errors: [] })
+    expect(removeMarketplaceSource(config, "opencode").marketplace?.sources).toEqual([])
+  })
+
+  test.each([
+    ["https://github.com/openai/plugins", "openai/plugins"],
+    ["github:github/awesome-copilot", "github/awesome-copilot"],
+    ["https://github.com/anthropics/claude-plugins-official.git", "anthropics/claude-plugins-official"],
+    ["https://example.test/team/marketplace.json", "https://example.test/team/marketplace.json"],
+  ])("labels %s without replacing its original reference with a download host", (reference, name) => {
+    const source = createMarketplaceSource({ url: reference })
+    expect(source.name).toBe(name)
+    expect(source.reference).toBe(reference)
+  })
+
+  test("repairs legacy hostname labels while preserving identity, addresses, and explicit names", () => {
+    const source = createMarketplaceSource({ url: "https://github.com/openai/plugins" })
+    const legacy = { ...source, name: "raw.githubusercontent.com" }
+    expect(marketplaceSources({ marketplace: { sources: [legacy] } })).toEqual([source])
+    const custom = { ...source, name: "Our curated catalog" }
+    expect(marketplaceSources({ marketplace: { sources: [custom] } })).toEqual([custom])
   })
 
   test("updates reactive configuration proxies used by the UI", () => {
@@ -729,13 +759,13 @@ describe("marketplace sources", () => {
     const spoofed = upsertMarketplaceSource(
       {},
       {
-        id: OFFICIAL_MARKETPLACE_SOURCE.id,
+        id: "opencode",
         name: "Not OpenCode",
         url: "https://evil.example/catalog.json",
         trust: "official",
       },
     )
-    expect(marketplaceSources(spoofed)[0]).toEqual(OFFICIAL_MARKETPLACE_SOURCE)
+    expect(marketplaceSources(spoofed)[0]).toMatchObject({ id: "opencode", name: "Not OpenCode", trust: "community" })
 
     const legacy = upsertMarketplaceSource(spoofed, {
       id: "legacy-verified",

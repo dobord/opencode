@@ -25,6 +25,59 @@ beforeEach(async () => {
 })
 
 describe("marketplace content-addressed cache", () => {
+  it.live("materializes a foreign skill with its companion files in an immutable tree", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch(request) {
+            const file = new URL(request.url).pathname
+            if (file === "/SKILL.md")
+              return new Response("---\nname: review\ndescription: Review\n---\nUse scripts/check.py")
+            if (file === "/scripts/check.py") return new Response("print('check')")
+            return new Response("not found", { status: 404 })
+          },
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          const cache = yield* MarketplaceCache.Service
+          const source = { id: "foreign", name: "Foreign", url: new URL("marketplace.json", server.url).href }
+          const materialized = yield* cache.materializePlan(
+            {
+              skills: {
+                items: [
+                  {
+                    id: "review",
+                    name: "review",
+                    url: new URL("SKILL.md", server.url).href,
+                    files: {
+                      "SKILL.md": new URL("SKILL.md", server.url).href,
+                      "scripts/check.py": new URL("scripts/check.py", server.url).href,
+                    },
+                  },
+                ],
+              },
+            },
+            source,
+          )
+          const skill = materialized.plan.skills?.items?.[0]
+          if (!skill?.path) throw new Error("Expected a materialized skill path")
+          const root = skill.path
+          expect(skill.url).toBeUndefined()
+          expect(yield* Effect.promise(() => Bun.file(path.join(root, "SKILL.md")).text())).toContain(
+            "Use scripts/check.py",
+          )
+          expect(yield* Effect.promise(() => Bun.file(path.join(root, "scripts/check.py")).text())).toBe(
+            "print('check')",
+          )
+          expect(materialized.artifactDigests).toHaveLength(2)
+          expect(materialized.treeDigest).toMatch(/^sha256:/)
+        }),
+      (server) => Effect.sync(() => server.stop(true)),
+    ),
+  )
+
   it.effect("deduplicates identical bytes by sha256 digest", () =>
     Effect.gen(function* () {
       const cache = yield* MarketplaceCache.Service
@@ -91,9 +144,9 @@ describe("marketplace content-addressed cache", () => {
           const pluginSpec = materialized.plan.plugins?.[0]
           expect(typeof pluginSpec).toBe("string")
           if (typeof pluginSpec !== "string") throw new Error("Expected a materialized plugin directory")
-          expect(yield* Effect.promise(() => fs.readFile(path.join(fileURLToPath(pluginSpec), "index.ts"), "utf8"))).toContain(
-            "MarketplacePlugin",
-          )
+          expect(
+            yield* Effect.promise(() => fs.readFile(path.join(fileURLToPath(pluginSpec), "index.ts"), "utf8")),
+          ).toContain("MarketplacePlugin")
           const skillItem = materialized.plan.skills?.items?.[0]
           expect(skillItem?.url).toBeUndefined()
           expect(yield* Effect.promise(() => fs.readFile(path.join(skillItem!.path!, "SKILL.md"), "utf8"))).toContain(
@@ -102,7 +155,9 @@ describe("marketplace content-addressed cache", () => {
           const mcpCommand = materialized.plan.mcp?.review_tools?.command
           if (!Array.isArray(mcpCommand)) throw new Error("Expected a materialized MCP command")
           expect(mcpCommand?.[1]?.startsWith(root)).toBe(false)
-          expect(yield* Effect.promise(() => fs.readFile(String(mcpCommand?.[1]), "utf8"))).toContain("MarketplacePlugin")
+          expect(yield* Effect.promise(() => fs.readFile(String(mcpCommand?.[1]), "utf8"))).toContain(
+            "MarketplacePlugin",
+          )
           const materializedInstruction = materialized.plan.instructions?.[0]
           expect(materializedInstruction?.startsWith("file:")).toBe(false)
           expect(yield* Effect.promise(() => fs.readFile(materializedInstruction!, "utf8"))).toContain("Always review")

@@ -58,7 +58,7 @@ In another terminal, with the password set:
 
 ```sh
 export OPENCODE_PASSWORD=marketplace-local
-./packages/cli/dist/cli-linux-x64/bin/opencode marketplace source-add "$PWD/artifacts/marketplace-smoke" --server http://127.0.0.1:4410
+./packages/cli/dist/cli-linux-x64/bin/opencode marketplace source-add https://github.com/openai/plugins --server http://127.0.0.1:4410
 ./packages/cli/dist/cli-linux-x64/bin/opencode marketplace list --server http://127.0.0.1:4410
 ./packages/cli/dist/cli-linux-x64/bin/opencode --server http://127.0.0.1:4410
 ```
@@ -67,9 +67,26 @@ export OPENCODE_PASSWORD=marketplace-local
 - **TUI:** use `/marketplace` or choose **Marketplace** from the command palette.
 - **Desktop:** set `OPENCODE_DESKTOP_TEST_ROOT=/tmp/opencode/marketplace-run` when launching the built desktop executable or `bun run --cwd packages/desktop preview`. This isolates both desktop preferences and its server. You can also add `http://127.0.0.1:4410` in its server settings to inspect the exact Web/TUI test server.
 
-Install **Alpha Tools**, explicitly accept the trust warning, and check Plugins, Skills, and MCPs. Toggle each component and the entire package, uninstall it, and check the installed/updates/source tabs. Source edits and package operations live in SQLite and do not rewrite `opencode.json(c)`. Plugin and config consumers reload without restarting the server.
+Review a package's compatible components and trust warning before installing it. Toggle each component and the entire package, uninstall it, and check the installed/updates/source tabs. Source edits and package operations live in SQLite and do not rewrite `opencode.json(c)`. Plugin and config consumers reload without restarting the server.
 
-The smoke catalog's plugins use the V2 plugin API. Arbitrary third-party V1 plugin implementations still require a source-level port; Marketplace does not translate executable plugin code.
+There is no built-in catalog or bundled demonstration plugin. Add sources explicitly. Automated tests create their own isolated fixtures. Arbitrary third-party V1 plugin implementations still require a source-level port; Marketplace does not translate executable plugin code.
+
+## GitHub catalogs
+
+Repository URLs and `github:owner/repository` discover these catalogs, in order:
+
+- `.opencode/marketplace.json` (native OpenCode)
+- `.claude-plugin/marketplace.json` (Claude Code)
+- `.github/plugin/marketplace.json` (Copilot)
+- `.agents/plugins/marketplace.json` (Codex)
+
+Previously saved GitHub sources pointing at the native path also use discovery; removing and re-adding them is unnecessary. This supports `github/awesome-copilot`, `anthropics/claude-plugins-official`, `anthropics/claude-plugins-community`, `openai/plugins`, and `openai/community-plugins`.
+
+Foreign bundles resolve on preview/install, not while listing the catalog. GitHub refs (including externally pinned plugin SHAs) resolve to a commit before reading components. Skills retain files inside their skill directory, and agents, commands, and compatible MCP configurations are imported as OpenCode configuration, not executable V2 plugins. GitHub's API rate limits apply. Skill assets use a shallow, blob-filtered sparse Git checkout of the pinned commit rather than a raw HTTP request for every reference or script (large bundles such as Cloudflare otherwise hit HTTP 429). Git must be available. Only selected files are copied into immutable artifacts; the temporary checkout is removed afterwards.
+
+The installation UI allows six minutes for slow repository transfers; ordinary reads retain their shorter deadline. Full repository ZIPs are deliberately avoided: the OpenAI ZIP is about 31 MB and can time out on a slow connection despite the selected skills being much smaller.
+
+Host-specific hooks, LSP servers, Codex apps, UI extensions, and MCP configurations requiring foreign path/environment substitution are not imported. Preview lists unsupported components; bundles with no compatible components fail rather than recording an empty installation. Foreign model names, tool restrictions, and permission declarations are not translated. Review imported prompts and the OpenCode permissions you grant separately. Assets outside a skill directory and host-specific runtime behavior may require a manual port.
 
 ## CLI and API
 

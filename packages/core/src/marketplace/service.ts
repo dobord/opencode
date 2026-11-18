@@ -37,6 +37,7 @@ import { composeMarketplaceConfig } from "./overlay"
 import { MarketplaceRegistry } from "./registry.js"
 import { MarketplaceCache } from "./cache.js"
 import { resolveMarketplaceSourceReference } from "./source"
+import { resolveForeignMarketplacePlan } from "./foreign.js"
 
 export type InstallInput = {
   key: string
@@ -125,6 +126,9 @@ function publicListing(listing: MarketplaceListing): MarketplaceListing {
   return {
     ...listing,
     source: publicSource(listing.source),
+    // Listings already contain their item. Repeating a multi-thousand-item
+    // catalog in every row makes the response quadratic in catalog size.
+    catalog: { ...listing.catalog, items: [] },
   }
 }
 
@@ -186,10 +190,21 @@ const layer = Layer.effect(
       }).pipe(Effect.orDie)
       return {
         state: publicState(state),
-        listings: loaded.listings.map((listing) => ({
-          ...publicListing(listing),
-          status: marketplaceStatus({ marketplace: state }, listing),
-        })),
+        listings: loaded.listings.map((listing) => {
+          const installed = state.installed?.[listing.key]
+          return {
+            ...publicListing(listing),
+            ...(listing.item.install.foreign && installed
+              ? {
+                  item: {
+                    ...listing.item,
+                    install: { ...clone(installed.plan), foreign: listing.item.install.foreign },
+                  },
+                }
+              : {}),
+            status: marketplaceStatus({ marketplace: state }, listing),
+          }
+        }),
         errors: loaded.errors.map((error) => ({ ...error, source: publicSource(error.source) })),
         cache: yield* cache.summary(),
       } satisfies MarketplaceView
@@ -241,15 +256,22 @@ const layer = Layer.effect(
           message: `Marketplace item not found: ${key}`,
         } satisfies MarketplacePlanResult
       }
+      const resolved = yield* Effect.tryPromise({
+        try: () => resolveForeignMarketplacePlan(listing.item.install, cache.fetcher()),
+        catch: (error) => (error instanceof Error ? error.message : String(error)),
+      }).pipe(Effect.result)
+      if (resolved._tag === "Failure")
+        return { ok: false, reason: "materialization", message: resolved.failure } satisfies MarketplacePlanResult
+      const preview = { ...listing, item: { ...listing.item, install: resolved.success.plan } }
       const status = marketplaceStatus({ marketplace: state }, listing)
       return {
         ok: true,
         key,
         action: status === "update" ? "update" : "install",
         trust_warning: !trusted(listing.source),
-        conflicts: yield* conflictList(state, listing),
-        permissions: marketplacePermissions(listing.item),
-        summary: marketplacePlanSummary(listing.item.install),
+        conflicts: yield* conflictList(state, preview),
+        permissions: marketplacePermissions(preview.item),
+        summary: [marketplacePlanSummary(preview.item.install), ...resolved.success.warnings].join("; "),
       } satisfies MarketplacePlanResult
     })
 
@@ -271,7 +293,25 @@ const layer = Layer.effect(
       force?: boolean
       acceptUntrusted?: boolean
     }) {
-      const conflicts = yield* conflictList(input.state, input.listing)
+      const resolved = yield* Effect.tryPromise({
+        try: () => resolveForeignMarketplacePlan(input.listing.item.install, cache.fetcher()),
+        catch: (error) => (error instanceof Error ? error.message : String(error)),
+      }).pipe(Effect.result)
+      if (resolved._tag === "Failure")
+        return {
+          ok: false as const,
+          failure: {
+            ok: false,
+            reason: "materialization",
+            message: resolved.failure,
+            revision: input.state.revision ?? 0,
+          } satisfies MarketplaceMutationResult,
+        }
+      const installPlan = resolved.success.plan
+      const conflicts = yield* conflictList(input.state, {
+        ...input.listing,
+        item: { ...input.listing.item, install: installPlan },
+      })
       if (conflicts.length && !input.force) {
         return {
           ok: false as const,
@@ -297,7 +337,7 @@ const layer = Layer.effect(
         }
       }
 
-      const materialized = yield* cache.materializePlan(input.listing.item.install, input.listing.source).pipe(
+      const materialized = yield* cache.materializePlan(installPlan, input.listing.source).pipe(
         Effect.map((value) => ({ ok: true as const, value })),
         Effect.catch((error) =>
           Effect.succeed({
@@ -373,13 +413,13 @@ const layer = Layer.effect(
       }
 
       const current = input.state.installed?.[input.listing.key]
-      const components = marketplaceSkillComponents(input.listing.item.install)
+      const components = marketplaceSkillComponents(installPlan)
       const disabledSkills =
         current?.disabled_skills?.filter((id) => components.some((component) => component.id === id)) ??
         components.filter((component) => component.enabled === false).map((component) => component.id)
       const disabledMcp =
-        current?.disabled_mcp?.filter((id) => id in (input.listing.item.install.mcp ?? {})) ??
-        marketplaceInitialDisabledMcp(input.listing.item.install)
+        current?.disabled_mcp?.filter((id) => id in (installPlan.mcp ?? {})) ??
+        marketplaceInitialDisabledMcp(installPlan)
       const enabled = current?.enabled !== false
       const activePlan = marketplaceActivePlan(materialized.value.plan, {
         enabled,
@@ -403,7 +443,7 @@ const layer = Layer.effect(
         installed_at: current?.installed_at ?? now,
         updated_at: now,
         snapshot: marketplaceSnapshot(input.listing.item),
-        plan: clone(input.listing.item.install),
+        plan: clone(installPlan),
         materialized_plan: materialized.value.plan,
         active_plan: activePlan,
         receipt: {},
@@ -591,7 +631,7 @@ const layer = Layer.effect(
       const resolved = yield* Effect.promise(() => resolveMarketplaceSourceReference(input.url))
       const source = {
         ...createMarketplaceSource({
-          url: resolved.url,
+          url: resolved.local ? resolved.url : resolved.reference,
           name: input.name ?? resolved.name,
           trust: input.trust,
           headers: resolved.local ? undefined : input.headers,

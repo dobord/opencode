@@ -59,8 +59,16 @@ export const Skill = Schema.Struct({
   path: optional(Schema.String),
   url: optional(Schema.String),
   enabled: optional(Schema.Boolean),
+  files: optional(Schema.Record(Schema.String, Schema.String)),
 })
 export const InstallPlan = Schema.Struct({
+  foreign: optional(
+    Schema.Struct({
+      format: Schema.Literals(["claude", "copilot", "codex"]),
+      catalog_url: Schema.String,
+      entry: Schema.Record(Schema.String, Schema.Unknown),
+    }),
+  ),
   plugins: optional(
     Schema.Array(
       Schema.Union([Schema.String, Schema.Tuple([Schema.String, Schema.Record(Schema.String, Schema.Unknown)])]),
