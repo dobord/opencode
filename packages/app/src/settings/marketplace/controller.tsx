@@ -99,7 +99,8 @@ export function createMarketplaceController(
   createEffect(() => {
     sdk.connection.attempt()
     const target = currentLocation()
-    if (target?.directory) untrack(() => void load(target))
+    // The app uses an empty directory for the server's default Location on Home.
+    if (target) untrack(() => void load(target))
   })
   // SSE owns normal progress. A slow fallback also repairs a terminal snapshot missed during a broken stream.
   const timer = setInterval(() => {

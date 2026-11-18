@@ -105,6 +105,18 @@ export function OperationCard(props: {
   )
 }
 
+export function OperationList(props: { controller: ReturnType<typeof createMarketplaceController> }) {
+  const operations = () =>
+    Object.values(props.controller.state().operations)
+      .toSorted((a, b) => b.created_at - a.created_at)
+      .filter((operation, index) => index < 30 || active(operation))
+  return (
+    <For each={operations().map((operation) => operation.id)}>
+      {(id) => <OperationCard operation={props.controller.state().operations[id]} controller={props.controller} />}
+    </For>
+  )
+}
+
 export function MarketplaceOperationsCenter() {
   const global = useGlobal()
   const language = useLanguage()
@@ -137,15 +149,7 @@ export function MarketplaceOperationsCenter() {
                       <bdi dir="ltr" class="break-all text-12">
                         {controller().state().status === "idle" ? "" : ServerConnection.key(server)}
                       </bdi>
-                      <For
-                        each={operations()
-                          .slice(0, 30)
-                          .map((operation) => operation.id)}
-                      >
-                        {(id) => (
-                          <OperationCard operation={controller().state().operations[id]} controller={controller()} />
-                        )}
-                      </For>
+                      <OperationList controller={controller()} />
                     </section>
                   </Show>
                 </Show>

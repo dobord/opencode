@@ -108,6 +108,18 @@ const PersistentPtyUpdate = Schema.Struct({
 })
 
 const Group = HttpApiGroup.make("mock")
+  .add(
+    HttpApiEndpoint.get("marketplaceSnapshot", "/api/experimental/marketplace/snapshot", {
+      success: Json,
+      error: MockServiceUnavailable.pipe(HttpApiSchema.status(503)),
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("marketplaceOperations", "/api/experimental/marketplace/operations", {
+      success: Json,
+      error: MockServiceUnavailable.pipe(HttpApiSchema.status(503)),
+    }),
+  )
   .add(HttpApiEndpoint.get("info", "/api/info", { success: Json }))
   .add(
     HttpApiEndpoint.get("event", "/api/event", {

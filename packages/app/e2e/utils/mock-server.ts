@@ -4,6 +4,8 @@ import { Permission } from "@opencode/schema/permission"
 import { artifactKind, artifactMime } from "@opencode/util/artifact"
 import { Model } from "@opencode/schema/model"
 import { Worktree } from "@opencode/schema/worktree"
+import type { Marketplace } from "@opencode/schema/marketplace"
+import type { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
 import { Effect, Layer, Option, Predicate, Schema } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/http-api"
@@ -47,6 +49,7 @@ export type MockFileContent =
   | undefined
 
 export interface MockServerConfig {
+  marketplace?: { view: Marketplace.View; operations: readonly MarketplaceOperation.Info[] }
   server?: string
   // The machine name `/api/info` reports; omitted like a server that predates it.
   hostname?: string
@@ -677,6 +680,17 @@ function mockHandlers(
 
   return HttpApiBuilder.group(MockApi, "mock", (handlers) =>
     handlers
+      // The background Marketplace is opt-in. Ordinary scenarios model the default-disabled server.
+      .handle("marketplaceSnapshot", () =>
+        config.marketplace
+          ? Effect.succeed(config.marketplace.view)
+          : Effect.fail(new MockServiceUnavailable({ message: "Marketplace operations are disabled" })),
+      )
+      .handle("marketplaceOperations", () =>
+        config.marketplace
+          ? Effect.succeed(config.marketplace.operations)
+          : Effect.fail(new MockServiceUnavailable({ message: "Marketplace operations are disabled" })),
+      )
       .handleRaw("event", () => {
         const events = config.events?.()
         const retry = config.eventRetry === undefined ? "" : `retry: ${config.eventRetry}\n\n`

@@ -7,7 +7,7 @@ import { Loader } from "@opencode/ui/loader"
 import { useServer } from "@/runtime/server/current"
 import { useLanguage } from "@/runtime/i18n/language"
 import { view, type Command } from "./operations-machine"
-import { OperationCard } from "./operations-center"
+import { OperationCard, OperationList } from "./operations-center"
 import { OperationStatus } from "./operation-status"
 
 export function BackgroundMarketplacePanel() {
@@ -103,7 +103,22 @@ export function BackgroundMarketplacePanel() {
           </Show>
         )}
       </For>
-      <For each={plans()}>{(operation) => <OperationCard operation={operation} controller={controller} />}</For>
+      <Show
+        when={controller.state().open}
+        fallback={
+          <For each={plans()}>{(operation) => <OperationCard operation={operation} controller={controller} />}</For>
+        }
+      >
+        <section class="flex flex-col gap-2" aria-label={language.t("marketplace.operations.title")}>
+          <div class="flex items-center justify-between gap-2">
+            <strong>{language.t("marketplace.operations.title")}</strong>
+            <Button variant="ghost-muted" onClick={() => controller.open(false)}>
+              {language.t("common.close")}
+            </Button>
+          </div>
+          <OperationList controller={controller} />
+        </section>
+      </Show>
       <Show
         when={form.tab === "sources"}
         fallback={

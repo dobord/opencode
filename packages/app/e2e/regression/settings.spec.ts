@@ -8,6 +8,8 @@ import { recordNotifications } from "../utils/notifications"
 import { installSseTransport } from "../utils/sse-transport"
 import { dict as ar } from "../../src/runtime/i18n/ar"
 import { dict as en } from "../../src/runtime/i18n/en"
+import { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
+import { Schema } from "effect"
 
 const directory = "C:/Projects/settings-demo"
 
@@ -58,6 +60,52 @@ const patched = (page: Page) =>
   page.waitForRequest(
     (request) => request.method() === "PATCH" && new URL(request.url()).pathname === `/api/project/${projectID}`,
   )
+
+test("Marketplace operations remain accessible in its dialog, outside settings, and after reload", async ({ page }) => {
+  const { settings } = await open(page, {
+    marketplace: {
+      view: {
+        state: { revision: 1 },
+        listings: [],
+        errors: [],
+        source_status: [],
+        cache: { root: "cache", objects: 0, total_bytes: 0, fetch_entries: 0, materializations: 0 },
+      },
+      operations: [
+        Schema.decodeUnknownSync(MarketplaceOperation.Info)({
+          id: MarketplaceOperation.ID.create(),
+          kind: "install",
+          target: "verify-package",
+          location: { directory },
+          version: 2,
+          status: "running",
+          phase: "downloading",
+          progress: { completed: 1, total: 2, unit: "files" },
+          created_at: 1,
+          updated_at: 2,
+          started_at: 1,
+        }),
+      ],
+    },
+  })
+  await settings.getByRole("tab", { name: "Extensions", exact: true }).click()
+  await settings.getByRole("button", { name: "Marketplace", exact: true }).click()
+  await page.getByRole("button", { name: "Marketplace operations", exact: true }).click()
+  const operations = page.getByRole("region", { name: "Marketplace operations", exact: true })
+  await expect(operations).toContainText("verify-package")
+  await expect(operations.getByRole("button", { name: "Cancel", exact: true })).toBeVisible()
+  await operations.getByRole("button", { name: "Close", exact: true }).click()
+  await page.getByRole("button", { name: "Close", exact: true }).click()
+  await page.getByRole("button", { name: "Home", exact: true }).click()
+  await expect(page).toHaveURL("/")
+  const badge = page.getByRole("button", { name: "Marketplace operations · 1", exact: true })
+  await badge.click()
+  await expect(operations).toContainText("verify-package")
+  await page.reload()
+  await badge.click()
+  await expect(operations).toContainText("verify-package")
+  await expect(operations.getByRole("button", { name: "Cancel", exact: true })).toBeVisible()
+})
 
 test("settings has its own route and returns through app history", async ({ page }) => {
   const { settings } = await open(page)
