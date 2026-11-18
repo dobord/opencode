@@ -192,6 +192,7 @@ export type MarketplaceCacheSummary = {
 }
 
 export type MarketplaceView = {
+  source_status?: Array<{ id: string; status: "checking" | "ready" | "failed" | "disabled"; message?: string }>
   state: MarketplaceState
   listings: MarketplaceListing[]
   errors: MarketplaceLoadError[]

@@ -160,10 +160,28 @@ const schema: Omit<DatabaseMigration.Migration, "id"> = {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`marketplace_operation\` (
+          \`sequence\` integer PRIMARY KEY AUTOINCREMENT,
+          \`id\` text NOT NULL UNIQUE,
+          \`request_id\` text NOT NULL UNIQUE,
+          \`command\` text NOT NULL,
+          \`data\` text NOT NULL,
+          \`status\` text NOT NULL,
+          \`time_created\` integer NOT NULL,
+          \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`marketplace_registry\` (
           \`id\` integer PRIMARY KEY,
           \`revision\` integer NOT NULL,
           \`time_updated\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`marketplace_source_status\` (
+          \`id\` text PRIMARY KEY,
+          \`data\` text NOT NULL
         );
       `)
       yield* tx.run(`
@@ -383,6 +401,9 @@ const schema: Omit<DatabaseMigration.Migration, "id"> = {
       yield* tx.run(`CREATE INDEX \`marketplace_install_position_idx\` ON \`marketplace_install\` (\`position\`);`)
       yield* tx.run(
         `CREATE INDEX \`marketplace_materialization_accessed_idx\` ON \`marketplace_materialization\` (\`time_accessed\`);`,
+      )
+      yield* tx.run(
+        `CREATE INDEX \`marketplace_operation_status_idx\` ON \`marketplace_operation\` (\`status\`,\`sequence\`);`,
       )
       yield* tx.run(`CREATE INDEX \`marketplace_source_position_idx\` ON \`marketplace_source\` (\`position\`);`)
       yield* tx.run(

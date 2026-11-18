@@ -7,6 +7,7 @@ import { prefersReducedMotion } from "@opencode/ui/motion"
 import { Titlebar } from "@/shell/titlebar/titlebar"
 import { usePlatform } from "@/runtime/platform/platform"
 import { ToastRegion } from "@/shell/notifications/toast"
+import { MarketplaceOperationsCenter } from "@/settings/marketplace/operations-center"
 import { createTipToasts } from "@/tips/model"
 import { UploadToastHost } from "@/composer/attachments/uploads"
 import { useSettingsSurface } from "@/settings/surface"
@@ -329,6 +330,7 @@ export default function Layout(props: ParentProps) {
       <div data-slot="composer-touch-bar-mount" class="order-last shrink-0" />
       <PluginSlot at="window.bottom" input={{}} />
       <ToastRegion />
+      <MarketplaceOperationsCenter />
       <UploadToastHost />
     </div>
   )

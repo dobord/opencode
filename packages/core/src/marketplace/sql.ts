@@ -1,5 +1,26 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import type { MarketplaceInstalled, MarketplaceSource } from "../marketplace.js"
+import type { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
+
+export const MarketplaceSourceStatusTable = sqliteTable("marketplace_source_status", {
+  id: text().primaryKey(),
+  data: text({ mode: "json" }).notNull(),
+})
+
+export const MarketplaceOperationTable = sqliteTable(
+  "marketplace_operation",
+  {
+    sequence: integer().primaryKey({ autoIncrement: true }),
+    id: text().notNull().unique(),
+    request_id: text().notNull().unique(),
+    command: text({ mode: "json" }).$type<MarketplaceOperation.Command>().notNull(),
+    data: text({ mode: "json" }).$type<MarketplaceOperation.Info>().notNull(),
+    status: text().$type<MarketplaceOperation.Status>().notNull(),
+    time_created: integer().notNull(),
+    time_updated: integer().notNull(),
+  },
+  (table) => [index("marketplace_operation_status_idx").on(table.status, table.sequence)],
+)
 
 export const MarketplaceRegistryTable = sqliteTable("marketplace_registry", {
   id: integer().primaryKey(),

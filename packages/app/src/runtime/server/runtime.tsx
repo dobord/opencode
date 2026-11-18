@@ -47,6 +47,7 @@ import type { SessionInfo } from "@opencode/client/promise"
 import { projectForSession } from "@/shell/layout/helpers"
 import { isProjectDirectory } from "@/workspaces/paths"
 import type { Project } from "@/runtime/server/types"
+import { createMarketplaceController } from "@/settings/marketplace/controller"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -258,6 +259,7 @@ function createServerController(
   })
 
   const sync = createServerSyncContext(sdk, data)
+  const marketplace = createMarketplaceController(sdk, () => data.location.default())
   const autoApprove = createPermissionAutoApprover({ sdk, data })
   onCleanup(data.on("session.deleted", (event) => sessionPreferences.forget(connKey, event.data.sessionID)))
 
@@ -379,6 +381,7 @@ function createServerController(
     notification,
     autoApprove,
     handoff,
+    marketplace,
   }
 }
 

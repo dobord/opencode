@@ -3,6 +3,8 @@ import { expect } from "bun:test"
 import { Effect, Schema } from "effect"
 import { Config } from "@opencode/schema/config"
 import { Marketplace } from "@opencode/schema/marketplace"
+import { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
+import { OpenCode, waitForMarketplaceOperation } from "@opencode/client/promise"
 import { Plugin } from "@opencode/schema/plugin"
 import { ensurePluginRuntime } from "@opencode/plugin/runtime"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
@@ -11,6 +13,196 @@ import { startServer } from "./fixture/server"
 import { eventually } from "../../core/test/lib/eventually"
 
 ensurePluginRuntime()
+
+it.live(
+  "executes durable Marketplace operations and binds install consent to the prepared plan",
+  () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("marketplace-operations-api-")))
+      const global = path.join(tmp.path, "global")
+      const project = path.join(tmp.path, "project")
+      const catalog = path.join(tmp.path, "catalog", "marketplace.json")
+      yield* Effect.promise(async () => {
+        await Bun.write(path.join(project, ".keep"), "")
+        await Bun.write(
+          path.join(global, "opencode.json"),
+          JSON.stringify({ experimental: { marketplace_operations: true } }),
+        )
+        await Bun.write(
+          catalog,
+          JSON.stringify({
+            schema: "opencode.marketplace/v1",
+            id: "local",
+            name: "Local",
+            items: [
+              {
+                id: "commands",
+                name: "Commands",
+                description: "Local commands",
+                kind: "bundle",
+                version: "1.0.0",
+                install: { commands: { background_command: { template: "Hello" } } },
+              },
+              {
+                id: "broken",
+                name: "Broken",
+                description: "Preserve this install on update failure",
+                kind: "bundle",
+                version: "1.0.0",
+                install: { commands: { retained_command: { template: "Keep me" } } },
+              },
+            ],
+          }),
+        )
+      })
+      const server = yield* startServer(global)
+      const root = "/api/experimental/marketplace"
+      const request = (route: string, method = "GET", body?: unknown, status = 200) =>
+        Effect.promise(async () => {
+          const url = new URL(route, server.base)
+          url.searchParams.set("location[directory]", project)
+          const response = await fetch(url, {
+            method,
+            headers: { ...server.headers, "content-type": "application/json" },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          })
+          const value: unknown = await response.json()
+          expect(response.status).toBe(status)
+          return value
+        })
+      const submit = (request_id: string, command: MarketplaceOperation.Command) =>
+        request(`${root}/operations`, "POST", { request_id, command }, 202).pipe(
+          Effect.map(Schema.decodeUnknownSync(MarketplaceOperation.Info)),
+        )
+      const complete = (id: MarketplaceOperation.ID) =>
+        eventually(
+          request(`${root}/operations/${id}`).pipe(Effect.map(Schema.decodeUnknownSync(MarketplaceOperation.Info))),
+          (info) => info.status !== "queued" && info.status !== "running" && info.status !== "cancelling",
+        )
+      const admitted = yield* submit("source", { kind: "source-add", url: "../catalog" })
+      const source = yield* complete(admitted.id)
+      expect(source.status).toBe("succeeded")
+      const snapshot = Schema.decodeUnknownSync(Marketplace.View)(yield* request(`${root}/snapshot`))
+      expect(snapshot.source_status?.[0]?.status).toBe("ready")
+      const bypass = Schema.decodeUnknownSync(Marketplace.MutationResult)(
+        yield* request(`${root}/source`, "POST", { expected_revision: 1, url: "../bypass" }),
+      )
+      expect(bypass.ok).toBe(false)
+      expect((yield* submit("source", { kind: "source-add", url: "../catalog" })).id).toBe(admitted.id)
+      yield* request(`${root}/operations`, "POST", { request_id: "source", command: { kind: "refresh" } }, 409)
+      const view = Schema.decodeUnknownSync(Marketplace.View)(yield* request(root))
+      const key = view.listings.find((listing) => listing.item.id === "commands")?.key
+      if (!key) throw new Error("Catalog listing missing")
+      const prepared = yield* complete((yield* submit("plan", { kind: "prepare-install", key })).id)
+      if (prepared.status !== "succeeded" || !prepared.result.fingerprint)
+        throw new Error("Prepared installation fingerprint missing")
+      const rejected = yield* complete(
+        (yield* submit("stale", { kind: "install", key, expected_fingerprint: "stale", accept_untrusted: true })).id,
+      )
+      expect(rejected).toMatchObject({ status: "failed", error: { code: "conflict" } })
+      const installed = yield* complete(
+        (yield* submit("install", {
+          kind: "install",
+          key,
+          expected_fingerprint: prepared.result.fingerprint,
+          accept_untrusted: true,
+        })).id,
+      )
+      expect(installed).toMatchObject({ status: "succeeded", result: { revision: 2, changed: true } })
+      const observed = yield* Effect.tryPromise((signal) =>
+        waitForMarketplaceOperation(
+          OpenCode.make({ baseUrl: server.base, headers: server.headers }),
+          installed.id,
+          { directory: project },
+          undefined,
+          signal,
+        ),
+      )
+      expect(observed.id).toBe(installed.id)
+      const current = Schema.decodeUnknownSync(Marketplace.View)(yield* request(root))
+      expect(current.state.installed?.[key]?.name).toBe("Commands")
+      const history = Schema.decodeUnknownSync(Schema.Array(MarketplaceOperation.Info))(
+        yield* request(`${root}/operations`),
+      )
+      expect(history.map((operation) => operation.status)).toEqual(["succeeded", "succeeded", "failed", "succeeded"])
+      expect(
+        Schema.decodeUnknownSync(MarketplaceOperation.Info)(
+          yield* request(`${root}/operations/${installed.id}/cancel`, "POST"),
+        ),
+      ).toEqual(installed)
+      yield* request(`${root}/operations/${MarketplaceOperation.ID.create()}`, "GET", undefined, 400)
+      const secondKey = view.listings.find((listing) => listing.item.id === "broken")?.key
+      if (!secondKey) throw new Error("Second catalog listing missing")
+      const secondPlan = yield* complete((yield* submit("second-plan", { kind: "prepare-install", key: secondKey })).id)
+      if (secondPlan.status !== "succeeded" || !secondPlan.result.fingerprint) throw new Error("Second plan missing")
+      expect(
+        (yield* complete(
+          (yield* submit("second-install", {
+            kind: "install",
+            key: secondKey,
+            expected_fingerprint: secondPlan.result.fingerprint,
+            accept_untrusted: true,
+          })).id,
+        )).status,
+      ).toBe("succeeded")
+      yield* Effect.promise(() =>
+        Bun.write(
+          catalog,
+          JSON.stringify({
+            schema: "opencode.marketplace/v1",
+            id: "local",
+            name: "Local",
+            items: [
+              {
+                id: "commands",
+                name: "Commands",
+                description: "Local commands",
+                kind: "bundle",
+                version: "2.0.0",
+                install: { commands: { background_command: { template: "Updated" } } },
+              },
+              {
+                id: "broken",
+                name: "Broken",
+                description: "Unavailable artifact",
+                kind: "bundle",
+                version: "2.0.0",
+                install: { skills: { items: [{ id: "missing", name: "missing", url: "./missing.md" }] } },
+              },
+            ],
+          }),
+        ),
+      )
+      const batch = yield* complete((yield* submit("update", { kind: "update-all", accept_untrusted: true })).id)
+      expect(batch.status).toBe("succeeded")
+      expect(batch.outcomes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key, status: "succeeded", revision: 4 }),
+          expect.objectContaining({
+            key: secondKey,
+            status: "failed",
+            error: expect.objectContaining({ code: "download" }),
+          }),
+        ]),
+      )
+      expect(batch.outcomes).toHaveLength(2)
+      const updated = Schema.decodeUnknownSync(Marketplace.View)(yield* request(root))
+      expect(updated.state.installed?.[key]?.version).toBe("2.0.0")
+      expect(updated.state.installed?.[secondKey]?.version).toBe("1.0.0")
+      expect(updated.state.installed?.[secondKey]?.plan).toMatchObject({
+        commands: { retained_command: { template: "Keep me" } },
+      })
+      const invalid = yield* complete(
+        (yield* submit("invalid-source", { kind: "source-add", url: "../missing.json" })).id,
+      )
+      expect(invalid.status).toBe("succeeded")
+      const failedSource = Schema.decodeUnknownSync(Marketplace.View)(yield* request(`${root}/snapshot`))
+      expect(failedSource.state.sources).toHaveLength(2)
+      expect(failedSource.source_status?.some((status) => status.status === "failed")).toBe(true)
+    }),
+  // Boots a real server and Location, then runs seven durable operations and their configuration reloads.
+  { timeout: 15_000 },
+)
 
 it.live(
   "installs, toggles, and removes a catalog bundle through the current API without rewriting user config",
@@ -59,7 +251,7 @@ it.live(
         )
       })
       const server = yield* startServer(global)
-      const request = (route: string, method = "GET", payload?: unknown) =>
+      const request = (route: string, method = "GET", payload?: unknown, status = 200) =>
         Effect.promise(async () => {
           const url = new URL(route, server.base)
           url.searchParams.set("location[directory]", project)
@@ -69,10 +261,11 @@ it.live(
             body: payload === undefined ? undefined : JSON.stringify(payload),
           })
           const body: unknown = await response.json()
-          expect(response.status).toBe(200)
+          expect(response.status).toBe(status)
           return body
         })
       const root = "/api/experimental/marketplace"
+      yield* request(`${root}/operations`, "GET", undefined, 503)
       const initial = Schema.decodeUnknownSync(Marketplace.View)(yield* request(root))
       const added = Schema.decodeUnknownSync(Marketplace.MutationResult)(
         yield* request(`${root}/source`, "POST", {

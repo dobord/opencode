@@ -326,6 +326,16 @@ import type {
   ConfigShellsOutput,
   ExperimentalConfigUpdateInput,
   ExperimentalConfigUpdateOutput,
+  ExperimentalMarketplaceSnapshotInput,
+  ExperimentalMarketplaceSnapshotOutput,
+  ExperimentalMarketplaceOperationsCreateInput,
+  ExperimentalMarketplaceOperationsCreateOutput,
+  ExperimentalMarketplaceOperationsListInput,
+  ExperimentalMarketplaceOperationsListOutput,
+  ExperimentalMarketplaceOperationsGetInput,
+  ExperimentalMarketplaceOperationsGetOutput,
+  ExperimentalMarketplaceOperationsCancelInput,
+  ExperimentalMarketplaceOperationsCancelOutput,
   ExperimentalMarketplaceGetInput,
   ExperimentalMarketplaceGetOutput,
   ExperimentalMarketplaceRefreshInput,
@@ -1824,6 +1834,69 @@ export function make(options: ClientOptions) {
           ),
       },
       marketplace: {
+        snapshot: (input?: ExperimentalMarketplaceSnapshotInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalMarketplaceSnapshotOutput>(
+            {
+              method: "GET",
+              path: `/api/experimental/marketplace/snapshot`,
+              query: { location: input?.["location"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404, 503],
+              empty: false,
+            },
+            requestOptions,
+          ),
+        operations: {
+          create: (input: ExperimentalMarketplaceOperationsCreateInput, requestOptions?: RequestOptions) =>
+            request<ExperimentalMarketplaceOperationsCreateOutput>(
+              {
+                method: "POST",
+                path: `/api/experimental/marketplace/operations`,
+                query: { location: input["location"] },
+                body: { request_id: input["request_id"], command: input["command"] },
+                successStatus: 202,
+                declaredStatuses: [400, 401, 404, 409, 503],
+                empty: false,
+              },
+              requestOptions,
+            ),
+          list: (input?: ExperimentalMarketplaceOperationsListInput, requestOptions?: RequestOptions) =>
+            request<ExperimentalMarketplaceOperationsListOutput>(
+              {
+                method: "GET",
+                path: `/api/experimental/marketplace/operations`,
+                query: { location: input?.["location"] },
+                successStatus: 200,
+                declaredStatuses: [400, 401, 404, 503],
+                empty: false,
+              },
+              requestOptions,
+            ),
+          get: (input: ExperimentalMarketplaceOperationsGetInput, requestOptions?: RequestOptions) =>
+            request<ExperimentalMarketplaceOperationsGetOutput>(
+              {
+                method: "GET",
+                path: `/api/experimental/marketplace/operations/${encodeURIComponent(input.id)}`,
+                query: { location: input["location"] },
+                successStatus: 200,
+                declaredStatuses: [400, 401, 404, 503],
+                empty: false,
+              },
+              requestOptions,
+            ),
+          cancel: (input: ExperimentalMarketplaceOperationsCancelInput, requestOptions?: RequestOptions) =>
+            request<ExperimentalMarketplaceOperationsCancelOutput>(
+              {
+                method: "POST",
+                path: `/api/experimental/marketplace/operations/${encodeURIComponent(input.id)}/cancel`,
+                query: { location: input["location"] },
+                successStatus: 200,
+                declaredStatuses: [400, 401, 404, 503],
+                empty: false,
+              },
+              requestOptions,
+            ),
+        },
         get: (input?: ExperimentalMarketplaceGetInput, requestOptions?: RequestOptions) =>
           request<ExperimentalMarketplaceGetOutput>(
             {
@@ -1843,7 +1916,7 @@ export function make(options: ClientOptions) {
               path: `/api/experimental/marketplace/refresh`,
               query: { location: input?.["location"] },
               successStatus: 200,
-              declaredStatuses: [400, 401, 404],
+              declaredStatuses: [400, 401, 404, 503],
               empty: false,
             },
             requestOptions,
@@ -1856,7 +1929,7 @@ export function make(options: ClientOptions) {
               query: { location: input["location"] },
               body: { key: input["key"] },
               successStatus: 200,
-              declaredStatuses: [400, 401, 404],
+              declaredStatuses: [400, 401, 404, 503],
               empty: false,
             },
             requestOptions,
@@ -1993,7 +2066,7 @@ export function make(options: ClientOptions) {
               query: { location: input?.["location"] },
               body: { max_age_days: input?.["max_age_days"] },
               successStatus: 200,
-              declaredStatuses: [400, 401, 404],
+              declaredStatuses: [400, 401, 404, 503],
               empty: false,
             },
             requestOptions,

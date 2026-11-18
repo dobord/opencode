@@ -137,7 +137,15 @@ export const CacheSummary = Schema.Struct({
   materializations: NonNegativeInt,
 }).annotate({ identifier: "MarketplaceCacheSummary" })
 
+export interface SourceStatus extends Schema.Schema.Type<typeof SourceStatus> {}
+export const SourceStatus = Schema.Struct({
+  id: Schema.String,
+  status: Schema.Literals(["checking", "ready", "failed", "disabled"]),
+  message: optional(Schema.String),
+}).annotate({ identifier: "Marketplace.SourceStatus" })
+
 export const View = Schema.Struct({
+  source_status: optional(Schema.Array(SourceStatus)),
   state: State,
   listings: Schema.Array(Listing),
   errors: Schema.Array(LoadError),

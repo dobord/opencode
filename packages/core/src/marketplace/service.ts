@@ -1,6 +1,9 @@
 export * as MarketplaceService from "./service.js"
 
 import { Context, Effect, Layer } from "effect"
+import { createHash } from "node:crypto"
+import { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
+import { MarketplaceOperationContext } from "./operation-context.js"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import {
   createMarketplaceSource,
@@ -32,6 +35,7 @@ import {
 } from "../marketplace.js"
 import { exportMarketplaceProfile, type MarketplaceProfile } from "../marketplace-profile.js"
 import { Config } from "../config.js"
+import { Location } from "../location.js"
 import { Document } from "@opencode/schema/config"
 import { composeMarketplaceConfig } from "./overlay"
 import { MarketplaceRegistry } from "./registry.js"
@@ -44,6 +48,7 @@ export type InstallInput = {
   expectedRevision: number
   force?: boolean
   acceptUntrusted?: boolean
+  expectedFingerprint?: string
 }
 
 export type UpdateAllInput = {
@@ -69,7 +74,10 @@ export type SourceAddInput = {
 }
 
 export interface Interface {
-  readonly get: (options?: { refresh?: boolean }) => Effect.Effect<MarketplaceView>
+  readonly execute: (
+    command: MarketplaceOperation.Command,
+  ) => Effect.Effect<MarketplaceOperation.Result, MarketplaceOperation.Failure>
+  readonly get: (options?: { refresh?: boolean; cached?: boolean }) => Effect.Effect<MarketplaceView>
   readonly plan: (key: string) => Effect.Effect<MarketplacePlanResult>
   readonly install: (input: InstallInput) => Effect.Effect<MarketplaceMutationResult>
   readonly updateAll: (input: UpdateAllInput) => Effect.Effect<MarketplaceMutationResult>
@@ -178,17 +186,37 @@ const layer = Layer.effect(
     const registry = yield* MarketplaceRegistry.Service
     const cache = yield* MarketplaceCache.Service
     const config = yield* Config.Service
+    const location = yield* Location.Service
 
-    const loadView = Effect.fnUntraced(function* (state: MarketplaceState, refresh: boolean) {
+    const loadView = Effect.fnUntraced(function* (state: MarketplaceState, refresh: boolean, cached = false) {
       const loaded = yield* Effect.tryPromise({
-        try: () =>
+        try: (signal) =>
           loadMarketplace({
             config: { marketplace: state },
-            fetch: cache.fetcher(refresh ? "refresh" : "cache-first"),
+            fetch: cache.fetcher(refresh ? "refresh" : cached ? "cache-only" : "cache-first", signal),
           }),
         catch: (error) => error,
       }).pipe(Effect.orDie)
+      if (refresh)
+        yield* Effect.forEach(
+          marketplaceSources({ marketplace: state }),
+          (source) => {
+            const error = loaded.errors.find((error) => error.source.id === source.id)
+            return registry.recordStatus({
+              id: source.id,
+              status: source.enabled === false ? "disabled" : error ? "failed" : "ready",
+              ...(error ? { message: error.message } : {}),
+            })
+          },
+          { discard: true },
+        )
+      const statuses = yield* registry.statuses()
       return {
+        source_status: marketplaceSources({ marketplace: state }).map((source) =>
+          source.enabled === false
+            ? { id: source.id, status: "disabled" as const }
+            : (statuses.find((status) => status.id === source.id) ?? { id: source.id, status: "checking" as const }),
+        ),
         state: publicState(state),
         listings: loaded.listings.map((listing) => {
           const installed = state.installed?.[listing.key]
@@ -210,8 +238,8 @@ const layer = Layer.effect(
       } satisfies MarketplaceView
     })
 
-    const get = Effect.fn("MarketplaceService.get")(function* (options?: { refresh?: boolean }) {
-      return yield* loadView(yield* registry.read(), options?.refresh === true)
+    const get = Effect.fn("MarketplaceService.get")(function* (options?: { refresh?: boolean; cached?: boolean }) {
+      return yield* loadView(yield* registry.read(), options?.refresh === true, options?.cached === true)
     })
 
     const rawBase = Effect.fnUntraced(function* () {
@@ -245,7 +273,8 @@ const layer = Layer.effect(
       return marketplaceConflicts(effective, listing.item.install)
     })
 
-    const plan = Effect.fn("MarketplaceService.plan")(function* (key: string) {
+    const preview = Effect.fn("MarketplaceService.preview")(function* (key: string) {
+      yield* MarketplaceOperationContext.phase("resolving")
       const state = yield* registry.read()
       const view = yield* loadView(state, false)
       const listing = view.listings.find((candidate) => candidate.key === key)
@@ -257,30 +286,39 @@ const layer = Layer.effect(
         } satisfies MarketplacePlanResult
       }
       const resolved = yield* Effect.tryPromise({
-        try: () => resolveForeignMarketplacePlan(listing.item.install, cache.fetcher()),
+        try: (signal) => resolveForeignMarketplacePlan(listing.item.install, cache.fetcher("refresh", signal)),
         catch: (error) => (error instanceof Error ? error.message : String(error)),
       }).pipe(Effect.result)
       if (resolved._tag === "Failure")
         return { ok: false, reason: "materialization", message: resolved.failure } satisfies MarketplacePlanResult
       const preview = { ...listing, item: { ...listing.item, install: resolved.success.plan } }
       const status = marketplaceStatus({ marketplace: state }, listing)
+      const conflicts = yield* conflictList(state, preview)
       return {
         ok: true,
         key,
         action: status === "update" ? "update" : "install",
         trust_warning: !trusted(listing.source),
-        conflicts: yield* conflictList(state, preview),
+        conflicts,
         permissions: marketplacePermissions(preview.item),
         summary: [marketplacePlanSummary(preview.item.install), ...resolved.success.warnings].join("; "),
-      } satisfies MarketplacePlanResult
+        fingerprint: confirmation(preview, conflicts),
+      } satisfies MarketplacePlanResult & { fingerprint: string }
+    })
+
+    const plan = Effect.fn("MarketplaceService.plan")(function* (key: string) {
+      const result = yield* preview(key)
+      if (!result.ok) return result
+      const { fingerprint: _fingerprint, ...value } = result
+      return value
     })
 
     const findListing = Effect.fnUntraced(function* (state: MarketplaceState, key: string, refresh: boolean) {
       const loaded = yield* Effect.tryPromise({
-        try: () =>
+        try: (signal) =>
           loadMarketplace({
             config: { marketplace: state },
-            fetch: cache.fetcher(refresh ? "refresh" : "cache-first"),
+            fetch: cache.fetcher(refresh ? "refresh" : "cache-first", signal),
           }),
         catch: (error) => error,
       }).pipe(Effect.orDie)
@@ -292,9 +330,11 @@ const layer = Layer.effect(
       listing: MarketplaceListing
       force?: boolean
       acceptUntrusted?: boolean
+      expectedFingerprint?: string
     }) {
+      yield* MarketplaceOperationContext.phase("resolving")
       const resolved = yield* Effect.tryPromise({
-        try: () => resolveForeignMarketplacePlan(input.listing.item.install, cache.fetcher()),
+        try: (signal) => resolveForeignMarketplacePlan(input.listing.item.install, cache.fetcher("refresh", signal)),
         catch: (error) => (error instanceof Error ? error.message : String(error)),
       }).pipe(Effect.result)
       if (resolved._tag === "Failure")
@@ -308,10 +348,24 @@ const layer = Layer.effect(
           } satisfies MarketplaceMutationResult,
         }
       const installPlan = resolved.success.plan
+      yield* MarketplaceOperationContext.phase("checking-conflicts")
       const conflicts = yield* conflictList(input.state, {
         ...input.listing,
         item: { ...input.listing.item, install: installPlan },
       })
+      if (
+        input.expectedFingerprint !== undefined &&
+        input.expectedFingerprint !==
+          confirmation({ ...input.listing, item: { ...input.listing.item, install: installPlan } }, conflicts)
+      )
+        return {
+          ok: false as const,
+          failure: {
+            ok: false,
+            reason: "conflict",
+            message: "Installation plan, trust or conflicts changed; prepare and confirm it again",
+          } satisfies MarketplaceMutationResult,
+        }
       if (conflicts.length && !input.force) {
         return {
           ok: false as const,
@@ -337,6 +391,7 @@ const layer = Layer.effect(
         }
       }
 
+      yield* MarketplaceOperationContext.phase("materializing")
       const materialized = yield* cache.materializePlan(installPlan, input.listing.source).pipe(
         Effect.map((value) => ({ ok: true as const, value })),
         Effect.catch((error) =>
@@ -463,8 +518,28 @@ const layer = Layer.effect(
       state: MarketplaceState
       connectMcp?: string[]
       preserved?: string[]
+      key?: string
     }) {
-      const stored = yield* registry.replace(input.state).pipe(
+      const operation = yield* MarketplaceOperationContext.Current
+      const stored = yield* Effect.gen(function* () {
+        if (operation) yield* operation.phase("applying")
+        return yield* registry.replace(
+          input.state,
+          operation
+            ? (tx, result) =>
+                operation.commit(
+                  tx,
+                  {
+                    revision: result.state.revision ?? 0,
+                    changed: result.changed,
+                    connect_mcp: Array.from(new Set(input.connectMcp ?? [])).toSorted(),
+                  },
+                  input.key,
+                )
+            : undefined,
+        )
+      }).pipe(
+        Effect.uninterruptible,
         Effect.map((value) => ({ ok: true as const, value })),
         Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
       )
@@ -473,28 +548,44 @@ const layer = Layer.effect(
         if (error instanceof MarketplaceRegistry.ConflictError) return revisionFailure(error.expected, error.actual)
         return revisionFailure(input.state.revision ?? 0, (yield* registry.read()).revision ?? 0)
       }
-      if (stored.value.changed && config.refresh) yield* config.refresh()
+      if (stored.value.changed && config.refresh)
+        yield* config
+          .refresh()
+          .pipe(
+            Effect.catchCause((cause) =>
+              operation
+                ? operation
+                    .warning("Registry saved, but configuration refresh failed; reload configuration to retry")
+                    .pipe(Effect.andThen(Effect.logWarning("Marketplace configuration refresh failed", cause)))
+                : Effect.failCause(cause),
+            ),
+          )
       return {
         ok: true,
         changed: stored.value.changed,
-        view: yield* loadView(stored.value.state, false),
+        view: operation
+          ? { state: publicState(stored.value.state), listings: [], errors: [], cache: yield* cache.summary() }
+          : yield* loadView(stored.value.state, false),
         connect_mcp: Array.from(new Set(input.connectMcp ?? [])).toSorted(),
         preserved: input.preserved ?? [],
       } satisfies MarketplaceMutationResult
     })
 
-    const install = Effect.fn("MarketplaceService.install")(function* (input: InstallInput) {
-      const state = yield* registry.read()
-      if ((state.revision ?? 0) !== input.expectedRevision) {
-        return revisionFailure(input.expectedRevision, state.revision ?? 0)
-      }
-      const listing = yield* findListing(state, input.key, true)
-      if (!listing) return notFound(`Marketplace item not found: ${input.key}`)
+    const installListing = Effect.fnUntraced(function* (input: {
+      state: MarketplaceState
+      listing: MarketplaceListing
+      force?: boolean
+      acceptUntrusted?: boolean
+      expectedFingerprint?: string
+    }) {
+      const state = input.state
+      const listing = input.listing
       const prepared = yield* prepare({
         state,
         listing,
         force: input.force,
         acceptUntrusted: input.acceptUntrusted,
+        expectedFingerprint: input.expectedFingerprint,
       })
       if (!prepared.ok) return prepared.failure
       const next: MarketplaceState = {
@@ -506,11 +597,21 @@ const layer = Layer.effect(
       }
       return yield* persist({
         state: next,
+        key: listing.key,
         connectMcp: marketplaceEnabledMcpNames(
           { marketplace: { installed: { [listing.key]: prepared.installed } } },
           listing.key,
         ),
       })
+    })
+
+    const install = Effect.fn("MarketplaceService.install")(function* (input: InstallInput) {
+      const state = yield* registry.read()
+      if ((state.revision ?? 0) !== input.expectedRevision)
+        return revisionFailure(input.expectedRevision, state.revision ?? 0)
+      const listing = yield* findListing(state, input.key, true)
+      if (!listing) return notFound(`Marketplace item not found: ${input.key}`)
+      return yield* installListing({ ...input, state, listing })
     })
 
     const updateAll = Effect.fn("MarketplaceService.updateAll")(function* (input: UpdateAllInput) {
@@ -519,7 +620,7 @@ const layer = Layer.effect(
         return revisionFailure(input.expectedRevision, state.revision ?? 0)
       }
       const loaded = yield* Effect.tryPromise({
-        try: () => loadMarketplace({ config: { marketplace: state }, fetch: cache.fetcher("refresh") }),
+        try: (signal) => loadMarketplace({ config: { marketplace: state }, fetch: cache.fetcher("refresh", signal) }),
         catch: (error) => error,
       }).pipe(Effect.orDie)
       const candidates = loaded.listings.filter(
@@ -628,7 +729,8 @@ const layer = Layer.effect(
       if ((state.revision ?? 0) !== input.expectedRevision) {
         return revisionFailure(input.expectedRevision, state.revision ?? 0)
       }
-      const resolved = yield* Effect.promise(() => resolveMarketplaceSourceReference(input.url))
+      yield* MarketplaceOperationContext.phase("checking-source")
+      const resolved = yield* Effect.promise(() => resolveMarketplaceSourceReference(input.url, location.directory))
       const source = {
         ...createMarketplaceSource({
           url: resolved.local ? resolved.url : resolved.reference,
@@ -639,7 +741,16 @@ const layer = Layer.effect(
         reference: resolved.reference,
       }
       const next = upsertMarketplaceSource({ marketplace: state }, source).marketplace ?? state
-      return yield* persist({ state: next })
+      yield* registry.recordStatus({ id: source.id, status: "checking" })
+      const checked = yield* loadView(next, true)
+      const result = yield* persist({ state: next })
+      if (result.ok) {
+        const operation = yield* MarketplaceOperationContext.Current
+        if (operation)
+          for (const error of checked.errors.filter((error) => error.source.id === source.id))
+            yield* operation.warning(error.message)
+      }
+      return result
     })
 
     const sourceToggle = Effect.fn("MarketplaceService.sourceToggle")(function* (input: {
@@ -686,7 +797,114 @@ const layer = Layer.effect(
       return (yield* cache.prune({ keep, maxAgeDays: input?.maxAgeDays }).pipe(Effect.orDie)).summary
     })
 
+    const updatePackages = Effect.fn("MarketplaceService.updatePackages")(function* (
+      command: Extract<MarketplaceOperation.Command, { kind: "update-all" }>,
+    ) {
+      const operation = yield* MarketplaceOperationContext.Current
+      if (!operation)
+        return yield* Effect.fail({
+          code: "invalid-request" as const,
+          message: "Bulk updates require the Marketplace worker",
+          retryable: false,
+        })
+      yield* operation.phase("checking-source")
+      const state = yield* registry.read()
+      const loaded = yield* Effect.tryPromise({
+        try: (signal) => loadMarketplace({ config: { marketplace: state }, fetch: cache.fetcher("refresh", signal) }),
+        catch: () => ({
+          code: "download" as const,
+          message: "Could not refresh Marketplace catalogs",
+          retryable: true,
+        }),
+      })
+      for (const error of loaded.errors) yield* operation.warning(error.message)
+      const candidates = loaded.listings.filter(
+        (listing) => marketplaceStatus({ marketplace: state }, listing) === "update",
+      )
+      const connect = new Set<string>()
+      const outcomes = yield* Effect.forEach(candidates, (listing, index) =>
+        Effect.gen(function* () {
+          const current = yield* registry.read()
+          const result = yield* installListing({
+            state: current,
+            listing,
+            force: command.force,
+            acceptUntrusted: command.accept_untrusted,
+          })
+          if (!result.ok) {
+            yield* operation.outcome({ key: listing.key, status: "failed", error: operationFailure(result) })
+            yield* operation.progress({ completed: index + 1, total: candidates.length, unit: "packages" })
+            return false
+          }
+          result.connect_mcp.forEach((name) => connect.add(name))
+          yield* operation.progress({ completed: index + 1, total: candidates.length, unit: "packages" })
+          return result.changed
+        }),
+      )
+      return {
+        revision: (yield* registry.read()).revision ?? 0,
+        changed: outcomes.some(Boolean),
+        connect_mcp: Array.from(connect).toSorted(),
+      }
+    })
+
+    const execute = Effect.fn("MarketplaceService.execute")(function* (command: MarketplaceOperation.Command) {
+      if (command.kind === "update-all") return yield* updatePackages(command)
+      if (command.kind === "prepare-install") {
+        const result = yield* preview(command.key)
+        if (!result.ok)
+          return yield* Effect.fail({
+            code: result.reason === "not_found" ? ("not-found" as const) : ("download" as const),
+            message: result.message,
+            retryable: true,
+          })
+        const { fingerprint, ...plan } = result
+        return { plan, fingerprint }
+      }
+      if (command.kind === "refresh") {
+        yield* MarketplaceOperationContext.phase("checking-source")
+        const view = yield* get({ refresh: true })
+        if (view.errors.length)
+          return yield* Effect.fail({
+            code: "download" as const,
+            message: view.errors.map((error) => error.message).join("; "),
+            retryable: true,
+          })
+        return { revision: view.state.revision ?? 0, changed: false }
+      }
+      if (command.kind === "prune") {
+        yield* cachePrune({ maxAgeDays: command.max_age_days })
+        return { changed: true }
+      }
+      const expectedRevision = (yield* registry.read()).revision ?? 0
+      const result = yield* (() => {
+        switch (command.kind) {
+          case "source-add":
+            return sourceAdd({ ...command, expectedRevision })
+          case "source-remove":
+            return sourceRemove({ ...command, expectedRevision })
+          case "source-toggle":
+            return sourceToggle({ ...command, expectedRevision })
+          case "install":
+            return install({
+              key: command.key,
+              expectedRevision,
+              expectedFingerprint: command.expected_fingerprint,
+              force: command.force,
+              acceptUntrusted: command.accept_untrusted,
+            })
+          case "uninstall":
+            return uninstall({ ...command, expectedRevision })
+          case "toggle":
+            return toggle({ ...command, expectedRevision })
+        }
+      })()
+      if (!result.ok) return yield* Effect.fail(operationFailure(result))
+      return { revision: result.view.state.revision ?? 0, changed: result.changed, connect_mcp: result.connect_mcp }
+    })
+
     return Service.of({
+      execute,
       get,
       plan,
       install,
@@ -705,5 +923,35 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Config.node, MarketplaceCache.node, MarketplaceRegistry.node],
+  deps: [Config.node, Location.node, MarketplaceCache.node, MarketplaceRegistry.node],
 })
+
+function confirmation(
+  listing: MarketplaceListing,
+  conflicts: ReadonlyArray<{ path: string; current: unknown; incoming: unknown }>,
+) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        item: listing.item,
+        source: { id: listing.source.id, url: listing.source.url, trust: listing.source.trust },
+        conflicts,
+      }),
+    )
+    .digest("hex")
+}
+
+function operationFailure(result: Extract<MarketplaceMutationResult, { ok: false }>): MarketplaceOperation.Failure {
+  return {
+    code:
+      result.reason === "not_found"
+        ? "not-found"
+        : result.reason === "trust"
+          ? "trust"
+          : result.reason === "materialization"
+            ? "download"
+            : "conflict",
+    message: result.message,
+    retryable: result.reason === "materialization",
+  }
+}

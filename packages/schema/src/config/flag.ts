@@ -8,6 +8,7 @@ export const wildcard = "all"
  * named explicitly in `experimental.<key>` or `OPENCODE_FLAGS`. Read a flag with Core's `Flag.enabled("<key>")`.
  */
 export const registry = {
+  marketplace_operations: "Enable the experimental durable Marketplace operations API and background worker.",
   todo: "Enable the experimental todowrite tool.",
   media_blob: "Store new session media once in a deduplicated blob table instead of inline in every message row.",
   automations:
@@ -23,7 +24,7 @@ export const registry = {
 } as const satisfies Record<string, string>
 export type Key = keyof typeof registry
 
-export const optInOnly: ReadonlySet<Key> = new Set(["full_codemode"])
+export const optInOnly: ReadonlySet<Key> = new Set(["full_codemode", "marketplace_operations"])
 
 /** Earlier names of a flag, still read from `experimental.<name>` and `OPENCODE_FLAGS` when the new key is unset. */
 export const aliases = {

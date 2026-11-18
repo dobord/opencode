@@ -62,6 +62,8 @@ import m59 from "./migration/20261116043204_automation.js"
 import m60 from "./migration/20261116181958_automation_event_position.js"
 import m61 from "./migration/20261116213417_automation_active_index.js"
 import m62 from "./migration/20261118070853_marketplace_registry.js"
+import m63 from "./migration/20261118113259_marketplace_operations.js"
+import m64 from "./migration/20261118123707_marketplace_source_status.js"
 
 export const migrations = [
   m00,
@@ -127,4 +129,6 @@ export const migrations = [
   m60,
   m61,
   m62,
+  m63,
+  m64,
 ] satisfies DatabaseMigration.Migration[]

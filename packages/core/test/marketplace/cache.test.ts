@@ -3,7 +3,9 @@ import os from "os"
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
 import { beforeEach, describe, expect } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
+import { MarketplaceOperationContext } from "../../src/marketplace/operation-context.js"
+import { tmpdirScoped } from "../fixture/tmpdir"
 import { sql } from "drizzle-orm"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Database } from "../../src/database/database.js"
@@ -25,6 +27,117 @@ beforeEach(async () => {
 })
 
 describe("marketplace content-addressed cache", () => {
+  it.live("serves cache-only reads without contacting an uncached or cached remote source", () =>
+    Effect.gen(function* () {
+      const requests = { count: 0 }
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            port: 0,
+            fetch() {
+              requests.count++
+              return new Response("catalog")
+            },
+          }),
+        ),
+        (server) => Effect.sync(() => server.stop(true)),
+      )
+      const cache = yield* MarketplaceCache.Service
+      expect((yield* cache.fetchResponse({ url: server.url.href, mode: "cache-only" }).pipe(Effect.result))._tag).toBe(
+        "Failure",
+      )
+      expect(requests.count).toBe(0)
+      yield* cache.fetchResponse({ url: server.url.href })
+      expect(requests.count).toBe(1)
+      expect(
+        yield* Effect.promise(() =>
+          cache
+            .fetcher("cache-only")(server.url)
+            .then((response) => response.text()),
+        ),
+      ).toBe("catalog")
+      expect(requests.count).toBe(1)
+    }),
+  )
+  it.live("aborts an in-flight HTTP body when the execution fiber is cancelled", () =>
+    Effect.gen(function* () {
+      const started = Promise.withResolvers<void>()
+      const aborted = Promise.withResolvers<void>()
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            port: 0,
+            fetch(request) {
+              request.signal.addEventListener("abort", () => aborted.resolve(), { once: true })
+              return new Response(
+                new ReadableStream({
+                  start(controller) {
+                    controller.enqueue(new TextEncoder().encode("partial"))
+                    started.resolve()
+                  },
+                  cancel() {
+                    aborted.resolve()
+                  },
+                }),
+              )
+            },
+          }),
+        ),
+        (server) => Effect.sync(() => server.stop(true)),
+      )
+      const cache = yield* MarketplaceCache.Service
+      const fiber = yield* cache.fetchResponse({ url: server.url.href }).pipe(Effect.forkChild())
+      yield* Effect.promise(() => started.promise)
+      yield* Fiber.interrupt(fiber)
+      yield* Effect.promise(() => aborted.promise).pipe(Effect.timeout("5 seconds"))
+      expect((yield* cache.summary()).fetch_entries).toBe(0)
+    }),
+  )
+
+  it.live("removes staging on cancellation between files without publishing a materialized tree", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const root = pathToFileURL(tmp.path + path.sep).href
+      yield* Effect.promise(async () => {
+        await Bun.write(path.join(tmp.path, "SKILL.md"), "Skill")
+        await Bun.write(path.join(tmp.path, "helper.txt"), "Companion")
+      })
+      const cache = yield* MarketplaceCache.Service
+      const result = yield* cache
+        .materializePlan(
+          {
+            skills: {
+              items: [
+                {
+                  id: "skill",
+                  name: "skill",
+                  files: { "SKILL.md": new URL("SKILL.md", root).href, "helper.txt": new URL("helper.txt", root).href },
+                },
+              ],
+            },
+          },
+          { id: "local", name: "Local", url: new URL("marketplace.json", root).href },
+        )
+        .pipe(
+          Effect.provideService(MarketplaceOperationContext.Current, {
+            phase: () => Effect.void,
+            progress: (progress) => (progress.completed === 1 ? Effect.interrupt : Effect.void),
+            commit: () => Effect.void,
+            outcome: () => Effect.void,
+            warning: () => Effect.void,
+          }),
+          Effect.exit,
+        )
+      expect(result._tag).toBe("Failure")
+      const summary = yield* cache.summary()
+      expect(summary.materializations).toBe(0)
+      const staging = yield* Effect.promise(() =>
+        Array.fromAsync(new Bun.Glob("**/*.tmp-*").scan({ cwd: summary.root, onlyFiles: false })),
+      )
+      expect(staging).toEqual([])
+    }),
+  )
+
   it.live("materializes a foreign skill with its companion files in an immutable tree", () =>
     Effect.acquireUseRelease(
       Effect.sync(() =>

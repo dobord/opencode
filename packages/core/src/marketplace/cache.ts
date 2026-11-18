@@ -12,6 +12,7 @@ import { EffectFlock } from "@opencode/util/effect-flock"
 import { Global } from "@opencode/util/global"
 import { foreignSkillRepositories } from "./foreign.js"
 import { MarketplaceGit } from "./git.js"
+import { MarketplaceOperationContext } from "./operation-context.js"
 import { AppProcess } from "@opencode/util/process"
 import { FSUtil } from "@opencode/util/fs-util"
 import type {
@@ -22,7 +23,7 @@ import type {
   MarketplaceSkill,
 } from "../marketplace.js"
 
-export type CacheMode = "cache-first" | "refresh"
+export type CacheMode = "cache-first" | "refresh" | "cache-only"
 type HeadersInit = ConstructorParameters<typeof Headers>[0]
 
 export type Artifact = {
@@ -70,7 +71,7 @@ export interface Interface {
     mode?: CacheMode
     source?: MarketplaceSource
   }) => Effect.Effect<Response, CacheError>
-  readonly fetcher: (mode?: CacheMode) => MarketplaceFetch
+  readonly fetcher: (mode?: CacheMode, signal?: AbortSignal) => MarketplaceFetch
   readonly materializePlan: (
     plan: MarketplaceInstallPlan,
     source: MarketplaceSource,
@@ -411,6 +412,12 @@ const layer = Layer.effect(
         })
       }
 
+      if (input.mode === "cache-only")
+        return yield* new CacheError({
+          operation: "cache",
+          message: "Catalog is not cached; refresh catalogs to load it",
+        })
+
       if (parsed.protocol === "file:") {
         const local = yield* Effect.tryPromise({
           try: async () => {
@@ -481,8 +488,16 @@ const layer = Layer.effect(
       if (row?.etag) headers.set("if-none-match", row.etag)
       if (row?.last_modified) headers.set("if-modified-since", row.last_modified)
 
+      const controller = yield* Effect.acquireRelease(
+        Effect.sync(() => new AbortController()),
+        (controller) => Effect.sync(() => controller.abort()),
+      )
       const attempt = yield* Effect.tryPromise({
-        try: () => globalThis.fetch(url, { headers, signal: input.signal }),
+        try: () =>
+          globalThis.fetch(url, {
+            headers,
+            signal: input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal,
+          }),
         catch: (error) => cacheError("fetch", error),
       }).pipe(
         Effect.map((response) => ({ ok: true as const, response })),
@@ -571,7 +586,7 @@ const layer = Layer.effect(
           "x-opencode-cache": "miss",
         },
       })
-    })
+    }, Effect.scoped)
 
     const fetchArtifact = Effect.fnUntraced(function* (input: {
       url: string
@@ -589,10 +604,13 @@ const layer = Layer.effect(
       return { bytes, digest, mediaType: response.headers.get("content-type") ?? undefined }
     })
 
-    const fetcher = (mode: CacheMode = "cache-first"): MarketplaceFetch => {
+    const fetcher = (mode: CacheMode = "cache-first", signal?: AbortSignal): MarketplaceFetch => {
       return async (input, init) => {
-        const request = input instanceof Request ? input : new Request(String(input), init)
-        return Effect.runPromiseWith(context)(
+        const original = input instanceof Request ? input : new Request(String(input), init)
+        const request = signal
+          ? new Request(original, { signal: AbortSignal.any([original.signal, signal]) })
+          : original
+        const response = await Effect.runPromiseWith(context)(
           fetchResponse({
             url: request.url,
             headers: request.headers,
@@ -600,7 +618,11 @@ const layer = Layer.effect(
             kind: "catalog",
             mode,
           }),
+          { signal: request.signal },
         )
+        if (mode === "refresh" && response.headers.get("x-opencode-cache") === "stale")
+          throw new Error("Catalog refresh failed; cached content remains available")
+        return response
       }
     }
 
@@ -706,6 +728,7 @@ const layer = Layer.effect(
       const pluginRelatives = new Map<number, string>()
       const mcpCommandRelatives = new Map<string, Map<number, string>>()
       const downloaded = new Map<string, Uint8Array>()
+      if (foreignSkillRepositories(plan).length) yield* MarketplaceOperationContext.phase("downloading")
       for (const repository of foreignSkillRepositories(plan)) {
         const files = yield* MarketplaceGit.readFiles({ ...repository, directory: root }).pipe(
           Effect.provideService(AppProcess.Service, proc),
@@ -882,28 +905,51 @@ const layer = Layer.effect(
       const treeDigest = digestOf(new TextEncoder().encode(stable(manifest)))
       const hex = digestHex(treeDigest)
       const target = path.join(materialized, hex.slice(0, 2), hex)
+      yield* MarketplaceOperationContext.phase("materializing")
+      const operation = yield* MarketplaceOperationContext.Current
+      if (operation) yield* operation.progress({ completed: 0, total: entries.size, unit: "files" })
 
       yield* flock
         .withLock(
           Effect.gen(function* () {
             if (!(yield* exists(target))) {
-              const staging = `${target}.tmp-${randomUUID()}`
-              yield* Effect.tryPromise({
-                try: async () => {
-                  for (const entry of entries.values()) {
-                    const file = path.join(staging, ...entry.relative.split("/"))
-                    await fsNode.mkdir(path.dirname(file), { recursive: true })
-                    await fsNode.writeFile(file, entry.bytes, { mode: 0o600 })
-                  }
-                  await fsNode.mkdir(path.dirname(target), { recursive: true })
-                  await fsNode.rename(staging, target).catch(async (error: NodeJS.ErrnoException) => {
-                    if (error.code !== "EEXIST") throw error
-                  })
-                  await fsNode.rm(staging, { recursive: true, force: true })
-                },
-                catch: (error) => cacheError("materialize", error),
-              })
+              yield* Effect.scoped(
+                Effect.gen(function* () {
+                  const staging = yield* Effect.acquireRelease(
+                    Effect.succeed(`${target}.tmp-${randomUUID()}`),
+                    (staging) => Effect.promise(() => fsNode.rm(staging, { recursive: true, force: true })),
+                  )
+                  yield* Effect.forEach(
+                    Array.from(entries.values()),
+                    (entry, index) =>
+                      Effect.gen(function* () {
+                        // Finish the current file before cleanup removes staging; cancellation is checked between files.
+                        yield* Effect.tryPromise({
+                          try: async () => {
+                            const file = path.join(staging, ...entry.relative.split("/"))
+                            await fsNode.mkdir(path.dirname(file), { recursive: true })
+                            await fsNode.writeFile(file, entry.bytes, { mode: 0o600 })
+                          },
+                          catch: (error) => cacheError("materialize", error),
+                        }).pipe(Effect.uninterruptible)
+                        if (operation)
+                          yield* operation.progress({ completed: index + 1, total: entries.size, unit: "files" })
+                      }),
+                    { discard: true },
+                  )
+                  yield* Effect.tryPromise({
+                    try: async () => {
+                      await fsNode.mkdir(path.dirname(target), { recursive: true })
+                      await fsNode.rename(staging, target).catch((error: NodeJS.ErrnoException) => {
+                        if (error.code !== "EEXIST") throw error
+                      })
+                    },
+                    catch: (error) => cacheError("materialize", error),
+                  }).pipe(Effect.uninterruptible)
+                }),
+              )
             }
+            if (operation) yield* operation.progress({ completed: entries.size, total: entries.size, unit: "files" })
 
             const now = Date.now()
             yield* db

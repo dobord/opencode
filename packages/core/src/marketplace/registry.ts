@@ -4,6 +4,8 @@ import { sql } from "drizzle-orm"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Database } from "../database/database.js"
 import type { MarketplaceInstalled, MarketplaceSource, MarketplaceState } from "../marketplace.js"
+import type { MarketplaceOperationContext } from "./operation-context.js"
+import { Marketplace } from "@opencode/schema/marketplace"
 
 const REGISTRY_ID = 1
 
@@ -22,8 +24,13 @@ export type ReplaceResult = {
 }
 
 export interface Interface {
+  readonly statuses: () => Effect.Effect<Marketplace.SourceStatus[]>
+  readonly recordStatus: (status: Marketplace.SourceStatus) => Effect.Effect<void>
   readonly read: () => Effect.Effect<MarketplaceState>
-  readonly replace: (state: MarketplaceState) => Effect.Effect<ReplaceResult, ConflictError>
+  readonly replace: (
+    state: MarketplaceState,
+    commit?: (tx: MarketplaceOperationContext.Executor, result: ReplaceResult) => Effect.Effect<void>,
+  ) => Effect.Effect<ReplaceResult, ConflictError>
   readonly changes: () => Stream.Stream<void>
 }
 
@@ -88,14 +95,21 @@ const layer = Layer.effect(
       return yield* readFrom(db)
     })
 
-    const replace = Effect.fn("MarketplaceRegistry.replace")(function* (state: MarketplaceState) {
+    const replace = Effect.fn("MarketplaceRegistry.replace")(function* (
+      state: MarketplaceState,
+      commit?: (tx: MarketplaceOperationContext.Executor, result: ReplaceResult) => Effect.Effect<void>,
+    ) {
       return yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
             const current = yield* readFrom(tx as unknown as Executor)
             const desired = normalize(state)
             const existing = normalize(current)
-            if (isDeepStrictEqual(existing, desired)) return { state: current, changed: false }
+            if (isDeepStrictEqual(existing, desired)) {
+              const result = { state: current, changed: false }
+              if (commit) yield* commit(tx, result)
+              return result
+            }
 
             const expected = state.revision ?? 0
             const actual = current.revision ?? 0
@@ -131,13 +145,15 @@ const layer = Layer.effect(
                 .pipe(Effect.orDie)
             }
 
-            return {
+            const result = {
               state: {
                 ...structuredClone(desired),
                 revision,
               },
               changed: true,
             }
+            if (commit) yield* commit(tx, result)
+            return result
           }),
         )
         .pipe(
@@ -146,7 +162,17 @@ const layer = Layer.effect(
         )
     })
 
-    return Service.of({ read, replace, changes: () => Stream.fromPubSub(updates) })
+    const statuses = Effect.fn("MarketplaceRegistry.statuses")(function* () {
+      const rows = yield* db.all<{ data: string }>(sql`SELECT data FROM marketplace_source_status`).pipe(Effect.orDie)
+      return rows.map((row) => Schema.decodeUnknownSync(Schema.fromJsonString(Marketplace.SourceStatus))(row.data))
+    })
+    const recordStatus = (status: Marketplace.SourceStatus) =>
+      db
+        .run(
+          sql`INSERT INTO marketplace_source_status (id, data) VALUES (${status.id}, ${JSON.stringify(status)}) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+        )
+        .pipe(Effect.orDie, Effect.asVoid)
+    return Service.of({ read, replace, statuses, recordStatus, changes: () => Stream.fromPubSub(updates) })
   }),
 )
 

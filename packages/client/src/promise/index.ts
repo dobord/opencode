@@ -27,3 +27,4 @@ export type {
   Attachment as PromptAttachment,
 } from "@opencode/schema/prompt"
 export type OpenCodeClient = ReturnType<typeof OpenCode.make>
+export { waitForMarketplaceOperation, marketplaceOperationActive } from "./marketplace.js"

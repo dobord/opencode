@@ -8,11 +8,36 @@ import { AppProcess } from "@opencode/util/process"
 import { FSUtil } from "@opencode/util/fs-util"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { MarketplaceGit } from "../../src/marketplace/git.js"
+import { MarketplaceOperationContext } from "../../src/marketplace/operation-context.js"
 import { testEffect } from "../lib/effect"
 import { initGit } from "../fixture/git"
 import { tmpdirScoped } from "../fixture/tmpdir"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([FSUtil.node, AppProcess.node])))
+
+it.live("rejects a failed Git transfer in streaming mode and cleans up its checkout", () =>
+  Effect.gen(function* () {
+    const temp = yield* tmpdirScoped()
+    const cache = path.join(temp.path, "cache")
+    const result = yield* MarketplaceGit.readFiles({
+      remote: pathToFileURL(path.join(temp.path, "missing")).href,
+      commit: "a".repeat(40),
+      files: new Map([["skill", "SKILL.md"]]),
+      directory: cache,
+    }).pipe(
+      Effect.provideService(MarketplaceOperationContext.Current, {
+        phase: () => Effect.void,
+        progress: () => Effect.void,
+        commit: () => Effect.void,
+        outcome: () => Effect.void,
+        warning: () => Effect.void,
+      }),
+      Effect.exit,
+    )
+    expect(result._tag).toBe("Failure")
+    expect(yield* Effect.promise(() => fs.readdir(cache))).toEqual([])
+  }),
+)
 
 it.live("reads a large skill tree at the pinned commit, including companion files, and removes its checkout", () =>
   Effect.gen(function* () {
@@ -40,7 +65,15 @@ it.live("reads a large skill tree at the pinned commit, including companion file
       commit,
       directory: cache,
       files: new Map(selected.map((file) => [file, file])),
-    })
+    }).pipe(
+      Effect.provideService(MarketplaceOperationContext.Current, {
+        phase: () => Effect.void,
+        progress: () => Effect.void,
+        commit: () => Effect.void,
+        outcome: () => Effect.void,
+        warning: () => Effect.void,
+      }),
+    )
     expect(result.size).toBe(424)
     expect(new TextDecoder().decode(result.get(selected[0]))).toBe(selected[0])
     expect(result.has("unrelated.txt")).toBe(false)

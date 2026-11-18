@@ -1,10 +1,30 @@
 import { Plugin } from "@opencode/plugin/tui"
 import { errorMessage } from "../../util/error"
+import { Schema } from "effect"
+import { onCleanup, onMount } from "solid-js"
+import { openMarketplaceBackground } from "./marketplace-background"
 
 async function open(context: Plugin.Context) {
   const client = context.client.experimental.marketplace
   const location = context.location ?? context.data.location.default()
   try {
+    const background = await client.operations.list({ location }).then(
+      () => true,
+      (error: unknown) => {
+        if (
+          Schema.is(Schema.Struct({ _tag: Schema.Literal("ServiceUnavailableError") }))(error) ||
+          Schema.is(
+            Schema.Struct({
+              name: Schema.Literal("ClientError"),
+              cause: Schema.Struct({ status: Schema.Literal(404) }),
+            }),
+          )(error)
+        )
+          return false
+        throw error
+      },
+    )
+    if (background) return await openMarketplaceBackground(context)
     for (;;) {
       const view = await client.get({ location })
       const expected_revision = view.state.revision ?? 0
@@ -169,6 +189,37 @@ async function open(context: Plugin.Context) {
 }
 
 function Commands(props: { context: Plugin.Context }) {
+  const lifetime = new AbortController()
+  onCleanup(() => lifetime.abort())
+  onMount(() => {
+    void (async () => {
+      for await (const event of props.context.client.event.subscribe({
+        types: ["marketplace.operation.updated"],
+        signal: lifetime.signal,
+      })) {
+        if (event.type !== "marketplace.operation.updated") continue
+        const operation = event.data.operation
+        if (operation.status === "queued" || operation.status === "running" || operation.status === "cancelling")
+          continue
+        props.context.ui.toast.show({
+          title: "Marketplace",
+          message:
+            operation.status === "failed"
+              ? operation.error.message
+              : `${operation.kind}: ${operation.status}. Open Marketplace operations for details.`,
+          variant:
+            operation.status === "failed"
+              ? "error"
+              : operation.warnings?.length || operation.outcomes?.some((outcome) => outcome.status === "failed")
+                ? "warning"
+                : "success",
+        })
+      }
+    })().catch((error) => {
+      if (!lifetime.signal.aborted)
+        props.context.ui.toast.show({ title: "Marketplace", message: errorMessage(error), variant: "error" })
+    })
+  })
   props.context.keymap.layer(() => ({
     mode: "global",
     commands: [

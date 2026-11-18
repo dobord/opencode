@@ -7,6 +7,8 @@ import { fetchLayer, httpClient, httpFetch } from "@opencode/util/effect/app-nod
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { Bus } from "@opencode/core/bus"
 import { EventLogger } from "@opencode/core/event-logger"
+import { MarketplaceOperations } from "@opencode/core/marketplace/operations"
+import { MarketplaceOperationStore } from "@opencode/core/marketplace/operation-store"
 import { FileSystemSearch } from "@opencode/core/filesystem/search"
 import { Credential } from "@opencode/core/credential"
 import { Config } from "@opencode/core/config"
@@ -64,6 +66,8 @@ const applicationServiceNodes = [
   Database.node,
   KV.node,
   Bus.node,
+  MarketplaceOperations.node,
+  MarketplaceOperationStore.node,
   // Before the jobs and sessions, so they are released after them: a shutdown's interrupted shell calls and jobs
   // still reach the daemon to stop their commands, and a command being created never falls back to spawning.
   PersistentPty.node,
@@ -194,6 +198,8 @@ function makeRoutes<AuthError, AuthServices>(
         Layer.succeedContext(
           Context.pick(
             Database.Service,
+            MarketplaceOperations.Service,
+            MarketplaceOperationStore.Service,
             Credential.Service,
             PermissionSaved.Service,
             PluginUpdate.Service,

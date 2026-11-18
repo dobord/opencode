@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ea0b1d35-879f-49a8-9359-ebb4aa4175a2",
-  "prevIds": ["ab8fea18-0d95-48a1-b631-c112235dc492"],
+  "id": "c294a3e7-0c66-414c-a838-17cb4729735b",
+  "prevIds": ["d8c9bca3-4c46-432f-9c63-bea21987121f"],
   "ddl": [
     {
       "name": "account_state",
@@ -57,7 +57,15 @@
       "entityType": "tables"
     },
     {
+      "name": "marketplace_operation",
+      "entityType": "tables"
+    },
+    {
       "name": "marketplace_registry",
+      "entityType": "tables"
+    },
+    {
+      "name": "marketplace_source_status",
       "entityType": "tables"
     },
     {
@@ -1113,6 +1121,86 @@
     {
       "type": "integer",
       "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "sequence",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "command",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_created",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "time_updated",
+      "entityType": "columns",
+      "table": "marketplace_operation"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -1139,6 +1227,26 @@
       "name": "time_updated",
       "entityType": "columns",
       "table": "marketplace_registry"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "marketplace_source_status"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "marketplace_source_status"
     },
     {
       "type": "text",
@@ -2652,10 +2760,24 @@
       "entityType": "pks"
     },
     {
+      "columns": ["sequence"],
+      "nameExplicit": false,
+      "name": "marketplace_operation_pk",
+      "table": "marketplace_operation",
+      "entityType": "pks"
+    },
+    {
       "columns": ["id"],
       "nameExplicit": false,
       "name": "marketplace_registry_pk",
       "table": "marketplace_registry",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "marketplace_source_status_pk",
+      "table": "marketplace_source_status",
       "entityType": "pks"
     },
     {
@@ -2925,6 +3047,24 @@
     {
       "columns": [
         {
+          "value": "status",
+          "isExpression": false
+        },
+        {
+          "value": "sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "marketplace_operation_status_idx",
+      "entityType": "indexes",
+      "table": "marketplace_operation"
+    },
+    {
+      "columns": [
+        {
           "value": "position",
           "isExpression": false
         }
@@ -3183,6 +3323,20 @@
       "name": "session_v2_time_suspended_idx",
       "entityType": "indexes",
       "table": "session_v2"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "marketplace_operation_id_unique",
+      "entityType": "uniques",
+      "table": "marketplace_operation"
+    },
+    {
+      "columns": ["request_id"],
+      "nameExplicit": false,
+      "name": "marketplace_operation_request_id_unique",
+      "entityType": "uniques",
+      "table": "marketplace_operation"
     }
   ],
   "renames": []

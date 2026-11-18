@@ -47,6 +47,7 @@ import type { WebSearch } from "@opencode/schema/websearch"
 import type { UsageLimits } from "@opencode/schema/usage-limits"
 import type { Config } from "@opencode/schema/config"
 import type { Marketplace } from "@opencode/schema/marketplace"
+import type { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
 
 export type ServerInfoOutput = {
   readonly version: string
@@ -2155,6 +2156,7 @@ export type EventSubscribeInput = {
         | "session.revert.staged"
         | "session.revert.cleared"
         | "session.revert.committed"
+        | "marketplace.operation.updated"
         | "filesystem.changed"
         | "reference.updated"
         | "permission.asked"
@@ -2846,6 +2848,50 @@ export interface ExperimentalConfigApi<E = never> {
   readonly update: ExperimentalConfigUpdateOperation<E>
 }
 
+export type ExperimentalMarketplaceSnapshotInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+export type ExperimentalMarketplaceSnapshotOutput = Marketplace.View
+export type ExperimentalMarketplaceSnapshotOperation<E = never> = (
+  input?: ExperimentalMarketplaceSnapshotInput,
+) => Effect.Effect<ExperimentalMarketplaceSnapshotOutput, E>
+
+export type ExperimentalMarketplaceOperationsCreateInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly request_id: MarketplaceOperation.RequestID
+  readonly command: MarketplaceOperation.Command
+}
+export type ExperimentalMarketplaceOperationsCreateOutput = MarketplaceOperation.Info
+export type ExperimentalMarketplaceOperationsCreateOperation<E = never> = (
+  input: ExperimentalMarketplaceOperationsCreateInput,
+) => Effect.Effect<ExperimentalMarketplaceOperationsCreateOutput, E>
+
+export type ExperimentalMarketplaceOperationsListInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+export type ExperimentalMarketplaceOperationsListOutput = ReadonlyArray<MarketplaceOperation.Info>
+export type ExperimentalMarketplaceOperationsListOperation<E = never> = (
+  input?: ExperimentalMarketplaceOperationsListInput,
+) => Effect.Effect<ExperimentalMarketplaceOperationsListOutput, E>
+
+export type ExperimentalMarketplaceOperationsGetInput = {
+  readonly id: MarketplaceOperation.ID
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+export type ExperimentalMarketplaceOperationsGetOutput = MarketplaceOperation.Info
+export type ExperimentalMarketplaceOperationsGetOperation<E = never> = (
+  input: ExperimentalMarketplaceOperationsGetInput,
+) => Effect.Effect<ExperimentalMarketplaceOperationsGetOutput, E>
+
+export type ExperimentalMarketplaceOperationsCancelInput = {
+  readonly id: MarketplaceOperation.ID
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+export type ExperimentalMarketplaceOperationsCancelOutput = MarketplaceOperation.Info
+export type ExperimentalMarketplaceOperationsCancelOperation<E = never> = (
+  input: ExperimentalMarketplaceOperationsCancelInput,
+) => Effect.Effect<ExperimentalMarketplaceOperationsCancelOutput, E>
+
 export type ExperimentalMarketplaceGetInput = {
   readonly location?: { readonly directory?: string | undefined } | undefined
 }
@@ -2971,6 +3017,13 @@ export type ExperimentalMarketplaceCachePruneOperation<E = never> = (
 ) => Effect.Effect<ExperimentalMarketplaceCachePruneOutput, E>
 
 export interface ExperimentalMarketplaceApi<E = never> {
+  readonly snapshot: ExperimentalMarketplaceSnapshotOperation<E>
+  readonly operations: {
+    readonly create: ExperimentalMarketplaceOperationsCreateOperation<E>
+    readonly list: ExperimentalMarketplaceOperationsListOperation<E>
+    readonly get: ExperimentalMarketplaceOperationsGetOperation<E>
+    readonly cancel: ExperimentalMarketplaceOperationsCancelOperation<E>
+  }
   readonly get: ExperimentalMarketplaceGetOperation<E>
   readonly refresh: ExperimentalMarketplaceRefreshOperation<E>
   readonly plan: ExperimentalMarketplacePlanOperation<E>

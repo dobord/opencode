@@ -1,4 +1,6 @@
 import { Marketplace } from "@opencode/schema/marketplace"
+import { MarketplaceOperation } from "@opencode/schema/marketplace-operation"
+import { ConflictError, InvalidRequestError, ServiceUnavailableError } from "../errors.js"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 import { LocationQuery, locationQueryOpenApi } from "./location.js"
@@ -8,6 +10,74 @@ const description = "Experimental: may change without compatibility guarantees."
 
 export const MarketplaceGroup = HttpApiGroup.make("server.experimental.marketplace")
   .add(
+    HttpApiEndpoint.get("marketplace.snapshot", `${root}/snapshot`, {
+      query: LocationQuery,
+      success: Marketplace.View,
+      error: ServiceUnavailableError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.marketplace.snapshot",
+          summary: "Read cached Marketplace state without network access",
+          description,
+        }),
+      ),
+    HttpApiEndpoint.post("marketplace.operations.create", `${root}/operations`, {
+      query: LocationQuery,
+      payload: MarketplaceOperation.Submit,
+      success: MarketplaceOperation.Info.annotate({ httpApiStatus: 202 }),
+      error: [ConflictError, ServiceUnavailableError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.marketplace.operations.create",
+          summary: "Queue a Marketplace operation",
+          description,
+        }),
+      ),
+    HttpApiEndpoint.get("marketplace.operations.list", `${root}/operations`, {
+      query: LocationQuery,
+      success: Schema.Array(MarketplaceOperation.Info),
+      error: ServiceUnavailableError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.marketplace.operations.list",
+          summary: "List Marketplace operations",
+          description,
+        }),
+      ),
+    HttpApiEndpoint.get("marketplace.operations.get", `${root}/operations/:id`, {
+      query: LocationQuery,
+      params: { id: MarketplaceOperation.ID },
+      success: MarketplaceOperation.Info,
+      error: [InvalidRequestError, ServiceUnavailableError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.marketplace.operations.get",
+          summary: "Get a Marketplace operation",
+          description,
+        }),
+      ),
+    HttpApiEndpoint.post("marketplace.operations.cancel", `${root}/operations/:id/cancel`, {
+      query: LocationQuery,
+      params: { id: MarketplaceOperation.ID },
+      success: MarketplaceOperation.Info,
+      error: [InvalidRequestError, ServiceUnavailableError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.marketplace.operations.cancel",
+          summary: "Cancel a Marketplace operation",
+          description,
+        }),
+      ),
     HttpApiEndpoint.get("marketplace.get", root, {
       query: LocationQuery,
       success: Marketplace.View,
@@ -17,6 +87,7 @@ export const MarketplaceGroup = HttpApiGroup.make("server.experimental.marketpla
         OpenApi.annotations({ identifier: "experimental.marketplace.get", summary: "Get Marketplace", description }),
       ),
     HttpApiEndpoint.post("marketplace.refresh", `${root}/refresh`, {
+      error: ServiceUnavailableError,
       query: LocationQuery,
       success: Marketplace.View,
     })
@@ -29,6 +100,7 @@ export const MarketplaceGroup = HttpApiGroup.make("server.experimental.marketpla
         }),
       ),
     HttpApiEndpoint.post("marketplace.plan", `${root}/plan`, {
+      error: ServiceUnavailableError,
       query: LocationQuery,
       payload: Marketplace.PlanInput,
       success: Marketplace.PlanResult,
@@ -146,6 +218,7 @@ export const MarketplaceGroup = HttpApiGroup.make("server.experimental.marketpla
         }),
       ),
     HttpApiEndpoint.post("marketplace.cachePrune", `${root}/cache/prune`, {
+      error: ServiceUnavailableError,
       query: LocationQuery,
       payload: Marketplace.CachePruneInput,
       success: Marketplace.CacheSummary,

@@ -304,6 +304,22 @@ export type CommandInfo = { name: string; description?: string }
 
 export type RpcOutput = { output?: any }
 
+export type MarketplaceOperationID = string
+
+export type MarketplaceOperationFailure = {
+  code: "invalid-request" | "conflict" | "trust" | "download" | "not-found" | "internal"
+  message: string
+  retryable: boolean
+}
+
+export type MarketplaceOperationProgress = {
+  completed: number
+  total?: number
+  unit: "bytes" | "objects" | "files" | "packages"
+}
+
+export type MarketplaceConflict = { path: string; current: any; incoming: any }
+
 export type PermissionReply = "once" | "always" | "reject"
 
 export type PtyID = string
@@ -385,6 +401,12 @@ export type ConfigModelReasoning =
   | { supported: true; toggle?: boolean; effort?: Array<string>; budget?: { min?: number; max?: number } }
 
 export type ConfigShellOption = { path: string; name: string; acceptable: boolean }
+
+export type MarketplaceSourceStatus = {
+  id: string
+  status: "checking" | "ready" | "failed" | "disabled"
+  message?: string
+}
 
 export type MarketplaceSource = {
   id: string
@@ -471,8 +493,6 @@ export type MarketplaceCacheSummary = {
   fetch_entries: number
   materializations: number
 }
-
-export type MarketplaceConflict = { path: string; current: any; incoming: any }
 
 export type MarketplaceConflict1 = { path: string; current: JsonValue; incoming: JsonValue }
 
@@ -950,6 +970,22 @@ export type PermissionSavedInfo = {
   time: { created: number; updated: number }
 }
 
+export type MarketplaceOperationPackageResult =
+  | { key: string; status: "succeeded"; revision: number }
+  | { key: string; status: "failed"; error: MarketplaceOperationFailure }
+
+export type MarketplacePlanResult =
+  | {
+      ok: true
+      key: string
+      action: "install" | "update"
+      trust_warning: boolean
+      conflicts: Array<MarketplaceConflict>
+      permissions: Array<string>
+      summary: string
+    }
+  | { ok: false; reason: "not_found" | "materialization"; message: string }
+
 export type Pty = {
   id: PtyID
   title: string
@@ -1145,13 +1181,13 @@ export type MarketplaceCatalog = {
   items: Array<MarketplaceItem>
 }
 
-export type MarketplacePlanResult =
+export type MarketplacePlanResult1 =
   | {
       ok: true
       key: string
       action: "install" | "update"
       trust_warning: boolean
-      conflicts: Array<MarketplaceConflict>
+      conflicts: Array<MarketplaceConflict1>
       permissions: Array<string>
       summary: string
     }
@@ -2372,6 +2408,14 @@ export type CredentialValue = CredentialOAuth | CredentialKey | CredentialExtern
 
 export type ConnectionInfo = ConnectionCredentialInfo | ConnectionEnvInfo
 
+export type MarketplaceOperationResult = {
+  revision?: number
+  changed?: boolean
+  connect_mcp?: Array<string>
+  plan?: MarketplacePlanResult
+  fingerprint?: string
+}
+
 export type PtyCreated = {
   id: EventID
   created: number
@@ -2451,6 +2495,14 @@ export type MarketplaceListing = {
   orphaned?: boolean
   catalog_url?: string
   catalog_digest?: string
+}
+
+export type MarketplaceOperationResult1 = {
+  revision?: number
+  changed?: boolean
+  connect_mcp?: Array<string>
+  plan?: MarketplacePlanResult1
+  fingerprint?: string
 }
 
 export type SessionInboxMove = {
@@ -2771,6 +2823,7 @@ export type ConfigEntry =
           portable_shell_scanner?: boolean
           codemode_vm?: boolean
           all_flags?: boolean
+          marketplace_operations?: boolean
           todo?: boolean
           media_blob?: boolean
           automations?: boolean
@@ -2874,14 +2927,391 @@ export type CredentialEntry = {
   value: CredentialValue
 }
 
+export type MarketplaceOperationInfo =
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      status: "queued"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at: number
+      phase:
+        | "starting"
+        | "checking-source"
+        | "resolving"
+        | "checking-conflicts"
+        | "downloading"
+        | "materializing"
+        | "applying"
+        | "refreshing-config"
+      progress?: MarketplaceOperationProgress
+      status: "running"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at: number
+      phase:
+        | "starting"
+        | "checking-source"
+        | "resolving"
+        | "checking-conflicts"
+        | "downloading"
+        | "materializing"
+        | "applying"
+        | "refreshing-config"
+      progress?: MarketplaceOperationProgress
+      status: "cancelling"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "succeeded"
+      result: MarketplaceOperationResult
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "failed"
+      error: MarketplaceOperationFailure
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "cancelled"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "interrupted"
+    }
+
 export type FormFields1 = [FormField1, ...Array<FormField1>]
 
 export type MarketplaceView = {
+  source_status?: Array<MarketplaceSourceStatus>
   state: MarketplaceState
   listings: Array<MarketplaceListing>
   errors: Array<MarketplaceLoadError>
   cache: MarketplaceCacheSummary
 }
+
+export type MarketplaceOperationInfo1 =
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      status: "queued"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at: number
+      phase:
+        | "starting"
+        | "checking-source"
+        | "resolving"
+        | "checking-conflicts"
+        | "downloading"
+        | "materializing"
+        | "applying"
+        | "refreshing-config"
+      progress?: MarketplaceOperationProgress
+      status: "running"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at: number
+      phase:
+        | "starting"
+        | "checking-source"
+        | "resolving"
+        | "checking-conflicts"
+        | "downloading"
+        | "materializing"
+        | "applying"
+        | "refreshing-config"
+      progress?: MarketplaceOperationProgress
+      status: "cancelling"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "succeeded"
+      result: MarketplaceOperationResult1
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "failed"
+      error: MarketplaceOperationFailure
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "cancelled"
+    }
+  | {
+      id: MarketplaceOperationID
+      kind:
+        | "source-add"
+        | "source-remove"
+        | "source-toggle"
+        | "refresh"
+        | "prepare-install"
+        | "install"
+        | "uninstall"
+        | "update-all"
+        | "toggle"
+        | "prune"
+      target?: string
+      outcomes?: Array<MarketplaceOperationPackageResult>
+      warnings?: Array<string>
+      location: LocationRef
+      version: number
+      created_at: number
+      updated_at: number
+      started_at?: number
+      finished_at: number
+      status: "interrupted"
+    }
 
 export type AgentInfo = {
   id: AgentID
@@ -2977,6 +3407,15 @@ export type SessionMessageAssistantContentEncoded =
 export type GenerateVideoGetResponse = { data: GenerateVideoJob }
 
 export type GenerateDecisionsResponse = { data: GenerateDecisionResult }
+
+export type MarketplaceOperationUpdated = {
+  id: EventID
+  created: number
+  metadata?: { [x: string]: any }
+  type: "marketplace.operation.updated"
+  location?: LocationRef
+  data: { operation: MarketplaceOperationInfo }
+}
 
 export type FormInfo1 = { id: FormID; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields1 }
 
@@ -3155,6 +3594,7 @@ export type V2Event =
   | SessionRevertStaged
   | SessionRevertCleared
   | SessionRevertCommitted
+  | MarketplaceOperationUpdated
   | FilesystemChanged
   | ReferenceUpdated
   | PermissionAsked
@@ -4690,6 +5130,7 @@ export type EventSubscribeInput = {
         | "session.revert.staged"
         | "session.revert.cleared"
         | "session.revert.committed"
+        | "marketplace.operation.updated"
         | "filesystem.changed"
         | "reference.updated"
         | "permission.asked"
@@ -5111,6 +5552,68 @@ export type ConfigShellsOutput = Array<ConfigShellOption>
 export type ExperimentalConfigUpdateInput = { readonly shell: string | null }
 
 export type ExperimentalConfigUpdateOutput = void
+
+export type ExperimentalMarketplaceSnapshotInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+
+export type ExperimentalMarketplaceSnapshotOutput = MarketplaceView
+
+export type ExperimentalMarketplaceOperationsCreateInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly request_id: string
+  readonly command:
+    | {
+        readonly kind: "source-add"
+        readonly url: string
+        readonly name?: string
+        readonly trust?: "community" | "private"
+        readonly headers?: { readonly [x: string]: string }
+      }
+    | { readonly kind: "source-remove"; readonly id: string }
+    | { readonly kind: "source-toggle"; readonly id: string; readonly enabled: boolean }
+    | { readonly kind: "refresh" }
+    | { readonly kind: "prepare-install"; readonly key: string }
+    | {
+        readonly kind: "install"
+        readonly key: string
+        readonly expected_fingerprint: string
+        readonly force?: boolean
+        readonly accept_untrusted?: boolean
+      }
+    | { readonly kind: "uninstall"; readonly key: string }
+    | { readonly kind: "update-all"; readonly force?: boolean; readonly accept_untrusted?: boolean }
+    | {
+        readonly kind: "toggle"
+        readonly key: string
+        readonly component: "package" | "skill" | "mcp"
+        readonly id?: string
+        readonly enabled: boolean
+      }
+    | { readonly kind: "prune"; readonly max_age_days?: number }
+}
+
+export type ExperimentalMarketplaceOperationsCreateOutput = MarketplaceOperationInfo1
+
+export type ExperimentalMarketplaceOperationsListInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+
+export type ExperimentalMarketplaceOperationsListOutput = Array<MarketplaceOperationInfo1>
+
+export type ExperimentalMarketplaceOperationsGetInput = {
+  readonly id: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+
+export type ExperimentalMarketplaceOperationsGetOutput = MarketplaceOperationInfo1
+
+export type ExperimentalMarketplaceOperationsCancelInput = {
+  readonly id: string
+  readonly location?: { readonly directory?: string | undefined } | undefined
+}
+
+export type ExperimentalMarketplaceOperationsCancelOutput = MarketplaceOperationInfo1
 
 export type ExperimentalMarketplaceGetInput = {
   readonly location?: { readonly directory?: string | undefined } | undefined

@@ -72,13 +72,25 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       description: "Manage Marketplace catalogs, packages, components, and artifact cache",
       globalFlags: ServerFlags,
       params: {
-        action: Argument.String("action").pipe(Argument.withDescription("list, refresh, plan, install, uninstall, update-all, toggle, source-add, source-remove, source-toggle, profile, or prune")),
+        action: Argument.String("action").pipe(
+          Argument.withDescription(
+            "list, refresh, plan, install, uninstall, update-all, toggle, source-add, source-remove, source-toggle, profile, or prune",
+          ),
+        ),
         target: Argument.String("target").pipe(Argument.optional),
         force: Flag.Boolean("force").pipe(Flag.withDefault(false)),
         acceptUntrusted: Flag.Boolean("accept-untrusted").pipe(Flag.withDefault(false)),
         disabled: Flag.Boolean("disabled").pipe(Flag.withDefault(false)),
         component: Flag.Literals("component", ["package", "skill", "mcp"]).pipe(Flag.withDefault("package")),
         id: Flag.String("id").pipe(Flag.optional),
+        detach: Flag.Boolean("detach").pipe(
+          Flag.withDefault(false),
+          Flag.withDescription("Return the durable operation without waiting for completion"),
+        ),
+        fingerprint: Flag.String("fingerprint").pipe(
+          Flag.optional,
+          Flag.withDescription("Use the fingerprint returned by a prepared installation"),
+        ),
       },
     }),
     Spec.make("upgrade", {

@@ -6,6 +6,8 @@ import { TextField } from "@opencode/ui/text-field"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
+import { useServer } from "@/runtime/server/current"
+import { BackgroundMarketplacePanel } from "./background-panel"
 import { formatServerError } from "@/runtime/server/errors"
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -24,6 +26,19 @@ export function DialogMarketplace() {
 }
 
 export function MarketplacePanel() {
+  const controller = useServer().ctx.marketplace
+  const data = useData()
+  onMount(() => {
+    if (controller.state().status === "idle") void controller.load(data.location.default())
+  })
+  return (
+    <Show when={controller.state().status !== "unavailable"} fallback={<LegacyMarketplacePanel />}>
+      <BackgroundMarketplacePanel />
+    </Show>
+  )
+}
+
+function LegacyMarketplacePanel() {
   const language = useLanguage()
   const sdk = useServerSDK()
   const data = useData()

@@ -17,6 +17,7 @@ import { LegacyEventV1 } from "./legacy-event.js"
 import { LspEvent } from "./lsp-event.js"
 import { LocationEvent } from "./location-event.js"
 import { McpEvent } from "./mcp-event.js"
+import { MarketplaceOperation } from "./marketplace-operation.js"
 import { Model } from "./model.js"
 import { ModelsDev } from "./models-dev.js"
 import { Permission } from "./permission.js"
@@ -52,6 +53,7 @@ const foundationDefinitions = Event.inventory(
 )
 
 const featureDefinitions = Event.inventory(
+  ...MarketplaceOperation.Event.Definitions,
   ...FileSystem.Event.Definitions,
   ...Reference.Event.Definitions,
   ...Permission.Event.Definitions,
