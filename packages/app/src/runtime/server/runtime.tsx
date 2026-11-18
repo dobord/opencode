@@ -259,7 +259,10 @@ function createServerController(
   })
 
   const sync = createServerSyncContext(sdk, data)
-  const marketplace = createMarketplaceController(sdk, () => data.location.default())
+  const marketplace = createMarketplaceController(sdk, () => {
+    const info = data.location.info()
+    return info ? { directory: info.directory } : data.location.default()
+  })
   const autoApprove = createPermissionAutoApprover({ sdk, data })
   onCleanup(data.on("session.deleted", (event) => sessionPreferences.forget(connKey, event.data.sessionID)))
 
